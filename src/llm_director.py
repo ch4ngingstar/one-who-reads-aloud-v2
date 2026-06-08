@@ -4,8 +4,16 @@ Module 3: LLM Director (Diarization)
 Reads text chunks from the DB, calls a local LLM to produce a structured
 JSON script (speaker + emotion per line), and writes results back to the DB.
 
-MODEL: Qwen2.5-7B-Instruct Q4_K_M (GGUF - split across 2 files)
-  Download: huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF
+RECOMMENDED MODEL: Qwen2.5-14B-Instruct Q4_K_M (3-part split, ~9 GB VRAM)
+  Download: huggingface.co/Qwen/Qwen2.5-14B-Instruct-GGUF
+  Files:    qwen2.5-14b-instruct-q4_k_m-00001-of-00003.gguf  (~3.99 GB)
+            qwen2.5-14b-instruct-q4_k_m-00002-of-00003.gguf  (~3.99 GB)
+            qwen2.5-14b-instruct-q4_k_m-00003-of-00003.gguf  (~1.01 GB)
+  Pass the -00001-of-00003 file as model_path; llama-cpp finds the rest automatically.
+  Fits RTX 4070 (12 GB) with ~2 GB headroom at n_ctx=8192.
+  Since LLM and TTS never load simultaneously, Fish Speech 5 GB + 14B 9 GB is fine.
+
+  FALLBACK (lower quality): Qwen2.5-7B-Instruct Q4_K_M (split, ~4.5 GB VRAM)
   Files: qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf  (~2.7 GB)
          qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf  (~1.8 GB)
   Pass the -00001- file as model_path; llama-cpp finds the rest automatically.
@@ -66,13 +74,15 @@ EMOTION_VOCAB = [
 
 # ── LLM generation config ──────────────────────────────────────────────────────
 _DEFAULT_CFG = {
+    # n_ctx=8192 verified safe for Qwen2.5-14B Q4_K_M on RTX 4070 (12 GB):
+    #   model weights ~8.5 GB + KV cache ~1.25 GB = ~9.75 GB total < 12 GB.
     "n_ctx":        8192,
     "n_batch":      512,
     "n_gpu_layers": -1,
     "verbose":      False,
-    "temperature":  0.05,
+    "temperature":  0.01,   # near-deterministic → consistent attribution across retries
     "max_tokens":   6144,
-    "retry_temp":   0.3,
+    "retry_temp":   0.2,    # low retry temperature — avoid hallucination on second attempt
     "max_retries":  3,
 }
 
@@ -131,6 +141,8 @@ R6  VALID EMOTION -- emotion must be exactly one value from the valid emotions l
 
 R7  UNKNOWN FALLBACK -- If you cannot identify the speaker from context, use Unknown.
      NEVER invent or guess character names that are not in the speaker roster above.
+     ANY minor character, guard, servant, stranger, crowd member, or unnamed NPC → Unknown.
+     A character's name appearing in narration nearby does NOT put them on the roster.
 
 R8  INNER MONOLOGUE -- This novel is written in close third-person. The protagonist (Sunny /
      Sunless) frequently thinks to himself. These thoughts MUST be assigned to Sunny, NOT
@@ -249,6 +261,40 @@ Output:
 NOTE: No quotes, no italic inner thought, no "he thought/wondered" -- pure action prose. Narrator only.
 WRONG would be: {{"speaker":"Sunny","text":"After a while, he sighed..."}} -- Sunny is NOT speaking here.
 
+Example 10 -- crowd / unnamed NPCs (ALWAYS Unknown when speaker not in roster):
+Input: The guards exchanged uneasy glances. "Who goes there?" one of them demanded sharply. "State your business," said the other, stepping forward.
+Output:
+{{"lines":[
+  {{"line_index":0,"speaker":"Narrator","text":"The guards exchanged uneasy glances.","emotion":"neutral"}},
+  {{"line_index":1,"speaker":"Unknown","text":"Who goes there?","emotion":"commanding"}},
+  {{"line_index":2,"speaker":"Narrator","text":"one of them demanded sharply.","emotion":"neutral"}},
+  {{"line_index":3,"speaker":"Unknown","text":"State your business,","emotion":"commanding"}},
+  {{"line_index":4,"speaker":"Narrator","text":"said the other, stepping forward.","emotion":"neutral"}}
+]}}
+NOTE: "one of them" and "the other" are NOT in the speaker roster → Unknown every time.
+NEVER invent a name. NEVER use a named character just because they are present in the scene.
+
+Example 11 -- stranger / minor NPC whose name is not in the roster:
+Input: "Your name?" Sunny asked. The man straightened his coat. "Riven. You can call me Riven," he answered.
+Output:
+{{"lines":[
+  {{"line_index":0,"speaker":"Sunny","text":"Your name?","emotion":"cold"}},
+  {{"line_index":1,"speaker":"Narrator","text":"Sunny asked. The man straightened his coat.","emotion":"neutral"}},
+  {{"line_index":2,"speaker":"Unknown","text":"Riven. You can call me Riven,","emotion":"neutral"}},
+  {{"line_index":3,"speaker":"Narrator","text":"he answered.","emotion":"neutral"}}
+]}}
+NOTE: "Riven" is NOT in the speaker roster → Unknown. Do not add new speakers to the roster.
+If a character appears only briefly, always default to Unknown rather than guessing.
+
+Example 12 -- System / Nightmare Spell notification (bracket content is spoken, NOT stage direction):
+Input: [Notification: A new Shadow has awakened within you. Embrace the darkness.]
+Output:
+{{"lines":[
+  {{"line_index":0,"speaker":"The Nightmare Spell","text":"[Notification: A new Shadow has awakened within you. Embrace the darkness.]","emotion":"cold"}}
+]}}
+NOTE: Square bracket notifications from the System are spoken by "The Nightmare Spell" -- do NOT assign to Narrator.
+Keep the brackets in the text exactly as they appear in the source.
+
 == OUTPUT FORMAT ==
 Respond with ONLY the JSON object below -- no markdown fences, no preamble, no trailing text:
 {{"lines":[
@@ -303,20 +349,28 @@ def _sanitize_text(text: str) -> str:
 def _is_narrator_misattribution(speaker: str, text: str) -> bool:
     """
     Safety net for the most common LLM mistake: assigning prose that describes
-    a character (starting with their own name) as that character's dialogue.
+    a character as that character's dialogue.
 
-    Example caught:
-      speaker="Sunny", text="Sunny walked forward, his eyes fixed on the gate."
-      → reclassify to Narrator because spoken lines never start with the speaker's own name.
-
-    Not triggered for inner monologue like "Sunny... that name felt hollow now."
-    because those are rare and the LLM handles them better with R8 guidance.
+    Patterns caught:
+      "Sunny walked forward..."     → first word == speaker name
+      "Sunny's eyes narrowed..."    → first word == speaker name + possessive "'s"
+      "He continued the slaughter..." assigned to Sunny → third-person pronoun
     """
     if not text or not speaker or speaker in ("Narrator", "Unknown"):
         return False
-    # "Sunny said..." / "He walked..." assigned to Sunny — third-person prose, not speech
+    speaker_lower = speaker.lower()
     first_word = text.split()[0].rstrip(",.!?:").lower() if text.split() else ""
-    return first_word == speaker.lower()
+
+    # "Sunny walked..." or "Sunny's eyes narrowed..."
+    if first_word in (speaker_lower, speaker_lower + "'s"):
+        return True
+
+    # Third-person pronouns/possessives as first word → always narration, never dialogue.
+    # "He walked...", "She sighed...", "His eyes...", "Her hand..." etc.
+    if first_word in ("he", "she", "they", "his", "her", "their", "it", "its"):
+        return True
+
+    return False
 
 
 def _parse_lines(response_text: str, line_offset: int = 0) -> list[dict]:
@@ -397,7 +451,8 @@ class LLMDirector:
         if not self.model_path.exists():
             raise FileNotFoundError(
                 f"GGUF model not found: {self.model_path}\n"
-                "Download from: https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF"
+                "Recommended: huggingface.co/Qwen/Qwen2.5-14B-Instruct-GGUF\n"
+                "  → qwen2.5-14b-instruct-q4_k_m-00001-of-00003.gguf  (~9 GB, 3-part split)"
             )
         print(f"[llm] Loading model: {self.model_path.name}")
         self._llm = Llama(

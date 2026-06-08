@@ -65,24 +65,13 @@ except ImportError:
 from state_manager import StateManager
 
 
-# ── Emotion → prosody hint prefix ────────────────────────────────────────────
-# Prepended to text so Fish Speech's language model can infer style.
-# Strip these if your TTS model handles emotion differently.
-_EMOTION_HINTS: dict[str, str] = {
-    "neutral":     "",
-    "whispers":    "(whispering) ",
-    "angry":       "(angrily) ",
-    "sad":         "(sadly) ",
-    "excited":     "(excitedly) ",
-    "commanding":  "(commanding) ",
-    "frightened":  "(frightened) ",
-    "confused":    "(confused) ",
-    "pleading":    "(pleading) ",
-    "cold":        "(coldly) ",
-    "laughing":    "(laughing) ",
-    "sarcastic":   "(sarcastically) ",
-    "desperate":   "(desperately) ",
-}
+# Fish Speech V1.5 is a voice cloner — it derives prosody from the reference
+# audio, not from text markers.  Parenthetical style cues like "(coldly) " or
+# "(frightened) " are read aloud as literal words, which is a bug.
+# Emotion is handled by selecting an emotion-specific reference clip (see
+# _resolve_ref_audio: it checks "{speaker}_{emotion}" first).
+# Do NOT re-introduce text prefixes here.
+_EMOTION_HINTS: dict[str, str] = {}  # intentionally empty
 
 # ── Speaker alias dictionary ──────────────────────────────────────────────────
 # Maps every title / alias the LLM may output → the canonical voice key.
@@ -214,21 +203,21 @@ _DEFAULT_CFG = {
     # Stabilizes voice cloning and reduces hallucinations/audio glitching.
     # Lower = more stable/consistent but slightly less expressive.
     # Tweak range: 0.60 (very stable, robotic risk) → 0.80 (natural, glitch risk).
-    "temperature":       0.72,
+    "temperature":       0.70,    # down from 0.72 → slightly more stable without losing naturalness
 
     # Restricts acoustic token sampling — keeps the output sounding strictly like
     # the reference file rather than drifting. Lower = tighter clone fidelity.
     # Tweak range: 0.75 (very tight) → 0.90 (more variation allowed).
-    "top_p":             0.85,
+    "top_p":             0.82,    # down from 0.85 → tighter clone fidelity
 
     # Critical for Fish Speech: prevents stuttering, echoing, and sentence-end
     # looping artifacts. Stay in 1.2–1.5; above 1.5 causes unnatural clipping.
     # Tweak range: 1.2 (light penalty) → 1.5 (aggressive, use if looping persists).
-    "repetition_penalty": 1.25,
+    "repetition_penalty": 1.30,   # up from 1.25 → stronger anti-loop for long Narrator lines
 
-    "max_new_tokens":    2048,     # max output tokens per synthesis
-    "chunk_length":      200,      # larger = more prosody context; 100 caused choppy transitions
-    "max_line_chars":    400,      # lines longer than this are split at sentence boundaries
+    "max_new_tokens":    4096,    # up from 2048 → prevents truncation of long Narrator passages
+    "chunk_length":      200,     # larger = more prosody context; 100 caused choppy transitions
+    "max_line_chars":    400,     # lines longer than this are split at sentence boundaries
 }
 
 
@@ -246,11 +235,18 @@ def _normalize_text(text: str) -> str:
     # Unicode quotes → ASCII
     text = text.replace('“', '"').replace('”', '"')
     text = text.replace('‘', "'").replace('’', "'")
-    # Strip LLM action/stage-direction markers: *sighs*, [pauses]
-    text = re.sub(r"\*[^*]{1,40}\*", "", text)
-    text = re.sub(r"\[[^\]]{1,40}\]", "", text)
-    # Em-dash → natural reading pause (comma reads better than bare em-dash)
-    text = text.replace('—', ', ')
+    # Strip italic/emphasis markers but keep their content.
+    # Only remove short pure-lowercase LLM stage directions like *sighs*, *pauses*.
+    # All other *wrapped text* has its content preserved — dropping it loses story words.
+    text = re.sub(r'\*([a-z]{1,20}s?)\*', '', text)          # *sighs* → gone
+    text = re.sub(r'\*([^*]{1,120})\*', r'\1', text)          # *inner thought* → inner thought
+    # Strip square brackets but KEEP their content.
+    # The novel uses [Aspect of the Void], [Rank: X] etc — these must be spoken.
+    text = re.sub(r'\[([^\]]*)\]', r'\1', text)
+    # Em-dash handling: mid-word interruption → ellipsis; mid-sentence → comma
+    text = re.sub(r'(\w)—$', r'\1...', text)    # trailing "word—" → "word..." (interrupted speech)
+    text = re.sub(r'(\w)—(\w)', r'\1, \2', text) # "word—word" → "word, word"
+    text = text.replace('—', ', ')               # remaining standalone em-dashes → pause
     # En-dash → spaced hyphen
     text = text.replace('–', ' - ')
     # Horizontal ellipsis → three dots
