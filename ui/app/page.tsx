@@ -108,7 +108,7 @@ export default function Dashboard() {
   const [logOpen,     setLogOpen]     = useState(false)
   const [sideTab,   setSideTab]   = useState<'setup' | 'voices'>('setup')
   const [startError,setStartError] = useState<string | null>(null)
-  const [llmPath,   setLlmPath]   = useState('')
+  const [llmPath,   setLlmPath]   = useState('C:/Users/alityan/OneDrive/Desktop/shaodw salve/models/qwen2.5-14b-instruct-q4_k_m-00001-of-00003.gguf')
   const [fishDir,   setFishDir]   = useState('')
   const [epubPath,  setEpubPath]  = useState('')
   const [speakers,  setSpeakers]  = useState('Sunny, Nephis, Cassie, Effie, Kai')
@@ -135,7 +135,7 @@ export default function Dashboard() {
     refreshVoices()
     let cfg: Partial<SavedConfig> = {}
     try { const r = localStorage.getItem(STORAGE_KEY); if (r) cfg = JSON.parse(r) } catch { /* */ }
-    if (cfg.llmPath)  setLlmPath(cfg.llmPath)
+    if (cfg.llmPath && !cfg.llmPath.includes('7b'))  setLlmPath(cfg.llmPath)
     if (cfg.fishDir)  setFishDir(cfg.fishDir)
     if (cfg.epubPath) setEpubPath(cfg.epubPath)
     if (cfg.speakers) setSpeakers(cfg.speakers)
