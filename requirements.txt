@@ -1,0 +1,30 @@
+# ── Step 1: EPUB Parser ───────────────────────────────────────────────────────
+EbookLib==0.18
+beautifulsoup4==4.12.3
+lxml==5.2.2
+spacy==3.7.4
+
+# ── Step 2: State Manager ─────────────────────────────────────────────────────
+aiosqlite==0.22.1
+
+# ── Step 3: LLM Director ──────────────────────────────────────────────────────
+# llama-cpp-python — install with CUDA pre-built wheel:
+#   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124 --no-cache-dir
+# Then add PyTorch lib dir to PATH (see scripts/start.ps1)
+llama-cpp-python==0.3.25
+
+# ── Step 4: TTS Engine ────────────────────────────────────────────────────────
+# fish-speech — install from source:
+#   cd fish-speech && pip install -e .
+# Weights: fish-speech/checkpoints/fish-speech-1.5/
+requests==2.33.0
+
+# ── Step 5: Audio Assembler ───────────────────────────────────────────────────
+pydub==0.25.1
+ffmpeg-python==0.2.0
+
+# ── Step 7: Backend ───────────────────────────────────────────────────────────
+fastapi==0.136.3
+uvicorn[standard]==0.30.1
+python-multipart==0.0.32
+httpx==0.27.0
