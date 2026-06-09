@@ -44,3 +44,6 @@ logs/
 Thumbs.db
 .idea/
 .vscode/
+
+# ─── Claude Code project instructions (kept local, not published) ──
+CLAUDE.md
