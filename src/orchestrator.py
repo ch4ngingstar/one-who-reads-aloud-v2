@@ -6,9 +6,9 @@ per-stage error isolation, and a progress callback for the FastAPI SSE stream.
 
 VRAM LIFECYCLE ENFORCED HERE:
   For every chapter:
-    1. LLMDirector context  [ loads ~4.5GB ] → process → [ purges VRAM ]
+    1. LLMDirector context  [ loads ~8.5GB ] → process → [ purges VRAM ]
     2. VRAM barrier check   [ asserts < 1 GB free before TTS ]
-    3. TTSEngine context     [ loads ~5.0GB ] → process → [ kills server ]
+    3. TTSEngine context     [ IndexTTS2 ~8GB ] → process → [ unloads model ]
     4. AudioAssembler.assemble_chapter()      [ CPU only, 0 VRAM ]
 
 RESUME LOGIC:
@@ -69,7 +69,7 @@ class PipelineConfig:
     # Required
     epub_path:        str
     llm_model_path:   str
-    fish_speech_dir:  str
+    tts_model_dir:    str   # IndexTTS2 checkpoints directory
 
     # Paths (sensible defaults)
     db_path:          str = "data/pipeline.db"
@@ -79,10 +79,6 @@ class PipelineConfig:
     # LLM
     speakers:         list = field(default_factory=lambda: list(DEFAULT_SPEAKERS))
     llm_n_gpu_layers: int  = -1
-
-    # TTS
-    fish_speech_url:      str  = "http://127.0.0.1:8080"
-    managed_tts_server:   bool = True
 
     # Assembly
     output_format:        str   = "mp3"
@@ -305,13 +301,11 @@ class PipelineOrchestrator:
         with self._tts_cls(
             self.sm,
             self.cfg.audio_wav_dir,
-            fish_speech_dir=self.cfg.fish_speech_dir,
-            server_url=self.cfg.fish_speech_url,
-            managed_server=self.cfg.managed_tts_server,
+            model_dir=self.cfg.tts_model_dir,
         ) as engine:
             engine.process_chapter(chapter_id, progress_callback=_tts_progress)
 
-        # TTS context has exited here — server killed, VRAM freed
+        # TTS context has exited here — IndexTTS2 unloaded, VRAM freed
         self._emit("stage_done", chapter_id=chapter_id, stage="synthesize",
                    elapsed_s=round(time.time() - t0, 1))
 

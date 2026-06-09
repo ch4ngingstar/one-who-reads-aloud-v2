@@ -18,7 +18,9 @@ ROOT  = os.path.abspath(os.path.join(SRC, ".."))
 # Download: huggingface.co/Qwen/Qwen2.5-14B-Instruct-GGUF
 #   → qwen2.5-14b-instruct-q4_k_m.gguf  (~8.5 GB)
 MODEL = os.path.join(ROOT, "models", "qwen2.5-14b-instruct-q4_k_m.gguf")
-FISH  = os.path.join(ROOT, "fish-speech")
+# IndexTTS2 checkpoints dir (config.yaml + weights).
+# Download: hf download IndexTeam/IndexTTS-2 --local-dir index-tts/checkpoints
+TTS_MODEL_DIR = os.path.join(ROOT, "index-tts", "checkpoints")
 EPUB  = "9kafe.com-shadow-slave-vol9-c1841-c2260.epub"
 
 start_idx = int(sys.argv[1]) if len(sys.argv) > 1 else 2
@@ -37,7 +39,7 @@ def on_progress(event):
 config = PipelineConfig(
     epub_path       = EPUB,
     llm_model_path  = MODEL,
-    fish_speech_dir = FISH,
+    tts_model_dir   = TTS_MODEL_DIR,
     db_path         = "data/pipeline.db",
     audio_wav_dir   = "data/audio",
     audio_mp3_dir   = "data/output",

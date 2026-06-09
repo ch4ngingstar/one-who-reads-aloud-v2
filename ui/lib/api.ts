@@ -19,7 +19,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export async function createProject(params: {
   epub_path: string
   llm_model_path: string
-  fish_speech_dir: string
+  tts_model_dir: string
   speakers?: string[]
 }): Promise<{ project_id: number; project: Project; progress: Progress }> {
   return req('/project', { method: 'POST', body: JSON.stringify(params) })
@@ -44,7 +44,7 @@ export async function getChapters(
 export async function startPipeline(params: {
   project_name: string
   llm_model_path: string
-  fish_speech_dir: string
+  tts_model_dir: string
   speakers?: string[]
   chapter_range?: [number, number] | null
   output_format?: string

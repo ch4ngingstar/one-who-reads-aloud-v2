@@ -1,38 +1,44 @@
 """
-Module 4: TTS Engine (Fish Speech V1.5)
-=========================================
-Reads diarized lines from the DB, synthesises each line as a WAV file
-using Fish Speech V1.5 zero-shot voice cloning, and writes results back.
+Module 4: TTS Engine (IndexTTS2)
+=================================
+Reads diarized lines from the DB, synthesises each line as a WAV file using
+**IndexTTS2** zero-shot voice cloning WITH per-line emotional control, and
+writes results back.
+
+WHY INDEXTTS2 (vs the previous Fish Speech V1.5):
+  Fish was a pure voice cloner — prosody came ONLY from the reference clip, so
+  the LLM's per-line `emotion` tag was discarded (flat / robotic output).
+  IndexTTS2 has emotion-identity DECOUPLING: a timbre clip (spk_audio_prompt)
+  PLUS an independent 8-dim emotion vector (emo_vector) + intensity (emo_alpha).
+  We now map every LLM emotion → a vector, so emotion actually drives prosody.
 
 SETUP (one-time):
-  1. Clone:   git clone https://github.com/fishaudio/fish-speech
-  2. Install: cd fish-speech && pip install -e ".[inference]"
-  3. Weights: huggingface-cli download fishaudio/fish-speech-1.5
-              --local-dir checkpoints/fish-speech-1.5
+  1. Clone:   git clone https://github.com/index-tts/index-tts
+  2. Install: cd index-tts && pip install -e .
+              (Windows: if deepspeed fails to build, run with use_deepspeed=False)
+  3. Weights: hf download IndexTeam/IndexTTS-2 --local-dir checkpoints
+  4. Point `model_dir` (or the UI "IndexTTS2 Model Dir") at index-tts/checkpoints
 
 VOICE CLONING REFERENCE AUDIO:
-  - 5–10 second clean WAV per character, stored anywhere you like.
+  - 5-10 second clean WAV per character (one neutral clip is enough now).
   - Register via StateManager:  sm.set_voice("Sunny", "/voices/sunny.wav")
-  - Emotion overrides (optional): sm.set_voice("Sunny_whispers", "/path/quiet.wav")
-    The engine resolves "{Speaker}_{emotion}" first, falls back to "{Speaker}".
+  - The old "{Speaker}_{emotion}" emotion-clip trick is no longer needed —
+    emotion comes from the vector. Such keys still resolve if present.
 
 VRAM LIFECYCLE (Hardware Enforcer):
-  This engine launches the Fish Speech API server as a subprocess.
-  __enter__  -> server starts  -> model loads into VRAM  (~5 GB)
-  __exit__   -> server killed  -> VRAM fully released
-  LLM must be unloaded BEFORE entering this context.
+  IndexTTS2 loads IN-PROCESS (no subprocess server).
+  __enter__  -> model loaded into VRAM  (~8 GB)
+  __exit__   -> model deleted + CUDA cache emptied -> VRAM released
+  LLM must be unloaded BEFORE entering this context (orchestrator enforces it).
 
-  with TTSEngine(sm, output_dir, fish_speech_dir="fish-speech") as engine:
+  with TTSEngine(sm, output_dir, model_dir="index-tts/checkpoints") as engine:
       engine.process_chapter(chapter_id)
-  # <- server killed here, VRAM clear
+  # <- model freed here, VRAM clear
 
 INPUT  (from Module 2 StateManager):
   sm.get_pending_tts_lines(chapter_id)
-  -> [{ "id": int, "line_index": int, "speaker": str,
-        "text": str, "emotion": str }]
-
-  sm.get_voice_map()
-  -> { "Speaker": "/path/to/ref.wav", ... }
+  -> [{ "id": int, "line_index": int, "speaker": str, "text": str, "emotion": str }]
+  sm.get_voice_map()  -> { "Speaker": {"path": str, "ref_text": str}, ... }
 
 OUTPUT (to Module 2 StateManager):
   sm.mark_line_tts_done(line_id, audio_path)
@@ -43,35 +49,42 @@ OUTPUT FILES:
   {output_dir}/ch_{chapter_id:04d}/line_{line_index:04d}.wav
 """
 
-import base64
 import gc
 import io
-import json
 import os
 import re
-import subprocess
-import sys
-import time
+import tempfile
 import wave as _wave_mod
 from pathlib import Path
 from typing import Callable, Optional
 
-try:
-    import requests as _requests_lib
-    _REQUESTS_AVAILABLE = True
-except ImportError:
-    _REQUESTS_AVAILABLE = False
 
 from state_manager import StateManager
 
 
-# Fish Speech V1.5 is a voice cloner — it derives prosody from the reference
-# audio, not from text markers.  Parenthetical style cues like "(coldly) " or
-# "(frightened) " are read aloud as literal words, which is a bug.
-# Emotion is handled by selecting an emotion-specific reference clip (see
-# _resolve_ref_audio: it checks "{speaker}_{emotion}" first).
-# Do NOT re-introduce text prefixes here.
-_EMOTION_HINTS: dict[str, str] = {}  # intentionally empty
+# ── Emotion → IndexTTS2 vector map ────────────────────────────────────────────
+# 8-dim order: [happy, angry, sad, afraid, disgust, melancholic, surprised, calm]
+# Each entry is (vector, emo_alpha).  emo_alpha = how strongly the emotion blends
+# over the speaker timbre (0 = pure timbre, 1 = full emotion).
+# "neutral" maps to an all-zero vector with alpha 0 → pure timbre (no emotion).
+# Tune these to taste; they are the dial for the whole audiobook's expressiveness.
+INDEXTTS2_EMOTION_VECTORS: dict[str, "tuple[list[float], float]"] = {
+    #            [hap, ang, sad, afr, dis, mel, sur, calm]
+    "neutral":   ([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 0.0),
+    "whispers":  ([0.0, 0.0, 0.1, 0.0, 0.0, 0.2, 0.0, 0.6], 0.5),
+    "angry":     ([0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 0.85),
+    "sad":       ([0.0, 0.0, 0.9, 0.0, 0.0, 0.3, 0.0, 0.0], 0.85),
+    "excited":   ([0.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.0], 0.85),
+    "commanding":([0.0, 0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.6], 0.70),
+    "frightened":([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.2, 0.0], 0.90),
+    "confused":  ([0.0, 0.0, 0.0, 0.2, 0.0, 0.2, 0.5, 0.0], 0.70),
+    "pleading":  ([0.0, 0.0, 0.6, 0.3, 0.0, 0.0, 0.0, 0.0], 0.80),
+    "cold":      ([0.0, 0.15, 0.0, 0.0, 0.1, 0.1, 0.0, 0.6], 0.50),
+    "laughing":  ([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3, 0.0], 0.85),
+    "sarcastic": ([0.3, 0.2, 0.0, 0.0, 0.3, 0.0, 0.0, 0.3], 0.70),
+    "desperate": ([0.0, 0.0, 0.5, 0.6, 0.0, 0.2, 0.0, 0.0], 0.90),
+}
+
 
 # ── Speaker alias dictionary ──────────────────────────────────────────────────
 # Maps every title / alias the LLM may output → the canonical voice key.
@@ -190,40 +203,16 @@ SPEAKER_ALIASES: dict[str, str] = {
 }
 
 
-# ── Default Fish Speech server config ────────────────────────────────────────
+# ── Default IndexTTS2 config ──────────────────────────────────────────────────
 _DEFAULT_CFG = {
-    "host":              "127.0.0.1",
-    "port":              8080,
-    "server_start_timeout": 90,    # seconds to wait for server ready
-    "request_timeout":   120,      # seconds per TTS request (longer for complex lines)
-    "max_retries":       3,        # retries on generation failure
-    "sample_rate":       44100,    # target sample rate for output WAVs
-
-    # ── Fish Speech V1.5 quality / stability params ──────────────────────────
-    # Stabilizes voice cloning and reduces hallucinations/audio glitching.
-    # Lower = more stable/consistent but slightly less expressive.
-    # Tweak range: 0.60 (very stable, robotic risk) → 0.80 (natural, glitch risk).
-    "temperature":       0.70,    # down from 0.72 → slightly more stable without losing naturalness
-
-    # Restricts acoustic token sampling — keeps the output sounding strictly like
-    # the reference file rather than drifting. Lower = tighter clone fidelity.
-    # Tweak range: 0.75 (very tight) → 0.90 (more variation allowed).
-    "top_p":             0.82,    # down from 0.85 → tighter clone fidelity
-
-    # Critical for Fish Speech: prevents stuttering, echoing, and sentence-end
-    # looping artifacts. Stay in 1.2–1.5; above 1.5 causes unnatural clipping.
-    # Tweak range: 1.2 (light penalty) → 1.5 (aggressive, use if looping persists).
-    "repetition_penalty": 1.30,   # up from 1.25 → stronger anti-loop for long Narrator lines
-
-    "max_new_tokens":    4096,    # up from 2048 → prevents truncation of long Narrator passages
-    "chunk_length":      200,     # larger = more prosody context; 100 caused choppy transitions
-    "max_line_chars":    400,     # lines longer than this are split at sentence boundaries
+    "use_fp16":       True,    # half precision — fits the RTX 4070 comfortably
+    "use_deepspeed":  False,   # deepspeed often fails to build on Windows; off by default
+    "use_cuda_kernel": False,  # BigVGAN custom CUDA kernel — off for portability
+    "max_retries":    2,       # retries on a failed generation
+    "max_line_chars": 400,     # lines longer than this are split at sentence boundaries
+    "emo_alpha_scale": 1.0,    # global multiplier on per-emotion alpha (master dial)
+    "config_name":    "config.yaml",  # IndexTTS2 config filename inside model_dir
 }
-
-
-def _encode_audio_b64(path: "str | Path") -> str:
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
 
 
 def _normalize_text(text: str) -> str:
@@ -237,22 +226,20 @@ def _normalize_text(text: str) -> str:
     text = text.replace('‘', "'").replace('’', "'")
     # Strip italic/emphasis markers but keep their content.
     # Only remove short pure-lowercase LLM stage directions like *sighs*, *pauses*.
-    # All other *wrapped text* has its content preserved — dropping it loses story words.
     text = re.sub(r'\*([a-z]{1,20}s?)\*', '', text)          # *sighs* → gone
     text = re.sub(r'\*([^*]{1,120})\*', r'\1', text)          # *inner thought* → inner thought
-    # Strip square brackets but KEEP their content.
-    # The novel uses [Aspect of the Void], [Rank: X] etc — these must be spoken.
+    # Strip square brackets but KEEP their content (e.g. [Aspect of the Void]).
     text = re.sub(r'\[([^\]]*)\]', r'\1', text)
     # Em-dash handling: mid-word interruption → ellipsis; mid-sentence → comma
-    text = re.sub(r'(\w)—$', r'\1...', text)    # trailing "word—" → "word..." (interrupted speech)
-    text = re.sub(r'(\w)—(\w)', r'\1, \2', text) # "word—word" → "word, word"
-    text = text.replace('—', ', ')               # remaining standalone em-dashes → pause
+    text = re.sub(r'(\w)—$', r'\1...', text)
+    text = re.sub(r'(\w)—(\w)', r'\1, \2', text)
+    text = text.replace('—', ', ')
     # En-dash → spaced hyphen
     text = text.replace('–', ' - ')
     # Horizontal ellipsis → three dots
     text = text.replace('…', '...')
     # Non-breaking space → regular space
-    text = text.replace(' ', ' ')
+    text = text.replace(' ', ' ')
     # Strip zero-width chars
     text = text.replace('​', '').replace('﻿', '')
     # Abbreviations (before punctuation normalization)
@@ -277,14 +264,14 @@ def _normalize_text(text: str) -> str:
 
     # Collapse multiple spaces / dangling punctuation from stripped markers
     text = re.sub(r' {2,}', ' ', text)
-    text = re.sub(r'[,;]\s*$', '.', text)      # trailing comma/semicolon → period
-    text = re.sub(r'(\w)$', lambda m: m.group(1) + '.', text)  # add period if no ending punctuation
+    text = re.sub(r'[,;]\s*$', '.', text)
+    text = re.sub(r'(\w)$', lambda m: m.group(1) + '.', text)
     return text.strip()
 
 
-def _wav_silence(duration_ms: int = 100, sample_rate: int = 44100) -> bytes:
+def _wav_silence(duration_ms: int = 100, sample_rate: int = 22050) -> bytes:
     """Generate a minimal silent WAV file as a fallback placeholder."""
-    import struct, math
+    import struct
     n_samples = int(sample_rate * duration_ms / 1000)
     data = b"\x00\x00" * n_samples  # 16-bit silence
     data_size = len(data)
@@ -307,52 +294,51 @@ def _wav_silence(duration_ms: int = 100, sample_rate: int = 44100) -> bytes:
 
 class TTSEngine:
     """
-    VRAM-safe TTS engine backed by Fish Speech V1.5.
-    Must be used as a context manager.
+    VRAM-safe TTS engine backed by IndexTTS2.  Must be used as a context manager.
 
     Parameters
     ----------
-    state_manager      : StateManager instance.
-    output_dir         : Root dir for WAV output files.
-    fish_speech_dir    : Path to the cloned fish-speech repo.
-                         Required when managed_server=True.
-    server_url         : Base URL for the Fish Speech API server.
-                         Only needed when managed_server=False (external server).
-    managed_server     : If True (default), this class starts and stops the
-                         Fish Speech server subprocess automatically.
-                         If False, you must start the server externally.
-    cfg                : Optional dict to override _DEFAULT_CFG values.
+    state_manager : StateManager instance.
+    output_dir    : Root dir for WAV output files.
+    model_dir     : Path to the IndexTTS2 `checkpoints/` directory (config.yaml +
+                    weights). Required to actually load the model (not needed for
+                    tests that monkeypatch `_synthesize`).
+    cfg           : Optional dict overriding _DEFAULT_CFG values.
+
+    Back-compat: the old Fish-era kwargs (`fish_speech_dir`, `server_url`,
+    `managed_server`) are accepted and ignored so existing callers don't break.
     """
 
     def __init__(
         self,
         state_manager: StateManager,
         output_dir: "str | Path",
-        fish_speech_dir: "str | Path | None" = None,
-        server_url: str = "http://127.0.0.1:8080",
-        managed_server: bool = True,
+        model_dir: "str | Path | None" = None,
         cfg: "dict | None" = None,
+        # Ignored Fish-era back-compat kwargs:
+        fish_speech_dir: "str | Path | None" = None,
+        server_url: "str | None" = None,
+        managed_server: "bool | None" = None,
     ):
-        self.sm               = state_manager
-        self.output_dir       = Path(output_dir)
-        self.fish_speech_dir  = Path(fish_speech_dir) if fish_speech_dir else None
-        self.server_url       = server_url.rstrip("/")
-        self.managed_server   = managed_server
-        self.cfg              = {**_DEFAULT_CFG, **(cfg or {})}
-        self._server_proc: Optional[subprocess.Popen] = None
+        self.sm         = state_manager
+        self.output_dir = Path(output_dir)
+        # Allow the legacy fish_speech_dir slot to carry the model dir if model_dir
+        # was not explicitly provided (keeps old orchestrator wiring functional).
+        _md = model_dir if model_dir is not None else fish_speech_dir
+        self.model_dir  = Path(_md) if _md else None
+        self.cfg        = {**_DEFAULT_CFG, **(cfg or {})}
+        self.model = None  # loaded in __enter__
 
     # ── Context manager (Hardware Enforcer) ───────────────────────────────────
 
     def __enter__(self):
-        if self.managed_server:
-            self._start_server()
-        else:
-            self._wait_for_server()
-        print("[tts] Engine ready.")
+        self._load_model()
+        print("[tts] IndexTTS2 engine ready.")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self._stop_server()
+        # Free the model and reclaim VRAM.
+        self.model = None
         gc.collect()
         try:
             import torch
@@ -363,86 +349,39 @@ class TTSEngine:
         print("[tts] VRAM released.")
         return False
 
-    # ── Server lifecycle ──────────────────────────────────────────────────────
+    # ── Model lifecycle ───────────────────────────────────────────────────────
 
-    def _start_server(self) -> None:
-        if self.fish_speech_dir is None:
+    def _load_model(self) -> None:
+        if self.model_dir is None:
             raise ValueError(
-                "fish_speech_dir must be set when managed_server=True.\n"
-                "Clone: git clone https://github.com/fishaudio/fish-speech"
+                "model_dir must be set to the IndexTTS2 checkpoints directory.\n"
+                "Clone: git clone https://github.com/index-tts/index-tts\n"
+                "Weights: hf download IndexTeam/IndexTTS-2 --local-dir checkpoints"
             )
-        fish_dir = self.fish_speech_dir.resolve()
-        server_script = fish_dir / "tools" / "api_server.py"
-        if not server_script.exists():
-            raise FileNotFoundError(f"Fish Speech server script not found: {server_script}")
+        model_dir = self.model_dir.resolve()
+        cfg_path = model_dir / self.cfg["config_name"]
+        if not cfg_path.exists():
+            raise FileNotFoundError(
+                f"IndexTTS2 config not found: {cfg_path}. "
+                "Point model_dir at the checkpoints dir containing config.yaml."
+            )
+        try:
+            from indextts.infer_v2 import IndexTTS2
+        except ImportError as e:
+            raise RuntimeError(
+                "IndexTTS2 is not installed. Install it from source:\n"
+                "  git clone https://github.com/index-tts/index-tts\n"
+                "  cd index-tts && pip install -e ."
+            ) from e
 
-        host = self.cfg["host"]
-        port = self.cfg["port"]
-        cmd = [
-            sys.executable, str(server_script),  # absolute path — safe regardless of cwd
-            "--listen", f"{host}:{port}",
-            "--device", "cuda",
-        ]
-        log_path = fish_dir / "fish_speech_server.log"
-        print(f"[tts] Starting Fish Speech server on {host}:{port}...")
-        print(f"[tts] Server log: {log_path}", flush=True)
-        self._stderr_file = open(log_path, "w")
-        self._server_proc = subprocess.Popen(
-            cmd,
-            cwd=str(fish_dir),
-            stdout=self._stderr_file,
-            stderr=subprocess.STDOUT,
-        )
-        print(f"[tts] Server PID: {self._server_proc.pid}", flush=True)
-        self._wait_for_server()
-
-    def _stop_server(self) -> None:
-        if self._server_proc is not None:
-            print("[tts] Stopping Fish Speech server...")
-            self._server_proc.terminate()
-            try:
-                self._server_proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                self._server_proc.kill()
-            self._server_proc = None
-            print("[tts] Server stopped.")
-        if hasattr(self, "_stderr_file") and self._stderr_file:
-            self._stderr_file.close()
-            self._stderr_file = None
-
-    def _wait_for_server(self) -> None:
-        """Poll /v1/health until the server responds or timeout."""
-        if not _REQUESTS_AVAILABLE:
-            raise RuntimeError("requests library not installed: pip install requests")
-
-        import requests
-        deadline = time.time() + self.cfg["server_start_timeout"]
-        print(f"[tts] Waiting for server at {self.server_url}...")
-        while time.time() < deadline:
-            # Fail fast if the subprocess has already exited
-            if self._server_proc is not None and self._server_proc.poll() is not None:
-                log_path = Path(getattr(self, "_stderr_file", None) and
-                                self._stderr_file.name or "fish_speech_server.log")
-                tail = ""
-                try:
-                    tail = log_path.read_text(errors="replace")[-2000:]
-                except Exception:
-                    pass
-                raise RuntimeError(
-                    f"Fish Speech server exited (code {self._server_proc.returncode}) "
-                    f"before becoming ready.\nLast output:\n{tail}"
-                )
-            try:
-                r = requests.get(f"{self.server_url}/v1/health", timeout=2)
-                if r.status_code == 200:
-                    print("[tts] Server is ready.")
-                    return
-            except Exception:
-                pass
-            time.sleep(2)
-        raise TimeoutError(
-            f"Fish Speech server did not become ready within "
-            f"{self.cfg['server_start_timeout']}s at {self.server_url}"
+        print(f"[tts] Loading IndexTTS2 from {model_dir} "
+              f"(fp16={self.cfg['use_fp16']}, deepspeed={self.cfg['use_deepspeed']})...")
+        self.model = IndexTTS2(
+            cfg_path=str(cfg_path),
+            model_dir=str(model_dir),
+            use_fp16=self.cfg["use_fp16"],
+            use_deepspeed=self.cfg["use_deepspeed"],
+            use_cuda_kernel=self.cfg["use_cuda_kernel"],
         )
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -499,41 +438,35 @@ class TTSEngine:
                 and line["speaker"] not in voice_map
             )
 
-            raw_text       = _normalize_text(line["text"])
-            text_with_hint = self._apply_emotion_hint(raw_text, line["emotion"])
+            raw_text              = _normalize_text(line["text"])
+            emo_vector, emo_alpha = self._resolve_emotion(line["emotion"])
+            emo_alpha            *= self.cfg["emo_alpha_scale"]
 
             max_chars = self.cfg["max_line_chars"]
-            segments  = self._split_long_line(text_with_hint, max_chars)
+            segments  = self._split_long_line(raw_text, max_chars)
             if len(segments) > 1:
                 print(f"[tts]   SPLIT line {line['line_index']:>4}: "
-                      f"{len(segments)} segments ({len(text_with_hint)} chars)")
+                      f"{len(segments)} segments ({len(raw_text)} chars)")
 
             wav_bytes = None
             last_err  = None
             for attempt in range(self.cfg["max_retries"] + 1):
                 try:
                     if len(segments) == 1:
-                        wav_bytes = self._synthesize(segments[0], ref_path, ref_text)
+                        wav_bytes = self._synthesize(
+                            segments[0], ref_path, ref_text, emo_vector, emo_alpha
+                        )
                     else:
-                        parts = [self._synthesize(seg, ref_path, ref_text)
-                                 for seg in segments]
+                        parts = [
+                            self._synthesize(seg, ref_path, ref_text, emo_vector, emo_alpha)
+                            for seg in segments
+                        ]
                         wav_bytes = self._concat_wavs(parts)
                     break
                 except Exception as e:
-                    last_err  = e
-                    err_lower = str(e).lower()
-                    is_conn = any(k in err_lower for k in (
-                        "connection", "max retries exceeded", "remotedisconnected",
-                        "connectionerror", "connectionrefused",
-                    ))
-                    if is_conn and self._try_restart_server():
-                        print(f"[tts]   Retry after server restart "
-                              f"(line {line['line_index']})...")
-                        time.sleep(2)
-                        continue
+                    last_err = e
                     print(f"[tts]   Retry {attempt + 1}/{self.cfg['max_retries']} "
                           f"line {line['line_index']:>4}: {e}")
-                    time.sleep(1)
 
             if wav_bytes:
                 audio_path.write_bytes(wav_bytes)
@@ -557,9 +490,15 @@ class TTSEngine:
     # ── Internal helpers ──────────────────────────────────────────────────────
 
     @staticmethod
-    def _apply_emotion_hint(text: str, emotion: str) -> str:
-        hint = _EMOTION_HINTS.get(emotion, "")
-        return hint + text if hint else text
+    def _resolve_emotion(emotion: str) -> "tuple[list[float] | None, float]":
+        """
+        Map an LLM emotion string → (emo_vector, emo_alpha) for IndexTTS2.
+        Unknown emotions and 'neutral' return (None, 0.0) → pure speaker timbre.
+        """
+        vec, alpha = INDEXTTS2_EMOTION_VECTORS.get(emotion, (None, 0.0))
+        if vec is None or not any(v > 0.0 for v in vec):
+            return None, 0.0
+        return vec, alpha
 
     @staticmethod
     def _split_long_line(text: str, max_chars: int) -> list:
@@ -591,20 +530,6 @@ class TTSEngine:
                     out.writeframes(src.readframes(src.getnframes()))
         return buf.getvalue()
 
-    def _try_restart_server(self) -> bool:
-        """Restart the managed Fish Speech server if it has crashed. Returns True if restarted."""
-        if not self.managed_server or self._server_proc is None:
-            return False
-        if self._server_proc.poll() is not None:
-            print("[tts]   Server process died — restarting...")
-            try:
-                self._stop_server()
-                self._start_server()
-                return True
-            except Exception as e:
-                print(f"[tts]   Restart failed: {e}")
-        return False
-
     @staticmethod
     def _resolve_ref_audio(
         speaker: str,
@@ -617,39 +542,32 @@ class TTSEngine:
         Resolution order:
           1. Normalise raw speaker string (strip + Title Case).
           2. Check SPEAKER_ALIASES → remap to canonical voice key.
-          3. Try "{canonical}_{emotion}" in voice_map.
+          3. Try "{canonical}_{emotion}" in voice_map (legacy emotion clips).
           4. Try "{canonical}" in voice_map.
           5. Try "_default" in voice_map (prints a warning for tracking).
-          6. Return None only if _default is also absent (should not happen
-             once _default is registered).
+          6. Return None only if _default is also absent.
         """
         def _extract(entry) -> "tuple[str, str]":
             if isinstance(entry, dict):
                 return entry["path"], entry.get("ref_text", "")
             return entry, ""  # backward compat if old string format
 
-        # ── 1. Normalise ──────────────────────────────────────────────────────
         normalised = speaker.strip().title()
-
-        # ── 2. Alias lookup ───────────────────────────────────────────────────
         canonical = SPEAKER_ALIASES.get(normalised, normalised)
-        # _default alias target is a sentinel — handle it directly
+
         if canonical == "_default":
             if "_default" in voice_map:
                 print(f"[tts]   ALIAS  '{speaker}' -> _default (NPC/Unknown fallback)")
                 return _extract(voice_map["_default"])
             return None
 
-        # ── 3. Emotion-specific override ──────────────────────────────────────
         emotion_key = f"{canonical}_{emotion}"
         if emotion_key in voice_map:
             return _extract(voice_map[emotion_key])
 
-        # ── 4. Base speaker match ─────────────────────────────────────────────
         if canonical in voice_map:
             return _extract(voice_map[canonical])
 
-        # ── 5. _default fallback — print warning for alias tracking ───────────
         if "_default" in voice_map:
             print(
                 f"[tts]   WARN   No voice for '{speaker}' "
@@ -662,67 +580,49 @@ class TTSEngine:
 
     # ── Raw synthesis call (injectable for testing) ───────────────────────────
 
-    def _synthesize(self, text: str, ref_audio_path: str, ref_text: str = "") -> bytes:
+    def _synthesize(
+        self,
+        text: str,
+        ref_audio_path: str,
+        ref_text: str = "",
+        emo_vector: "list[float] | None" = None,
+        emo_alpha: float = 0.0,
+    ) -> bytes:
         """
-        Call the Fish Speech API and return raw WAV bytes.
-        Separated so tests can monkeypatch without a running server.
+        Call IndexTTS2 and return raw WAV bytes.
+        Separated so tests can monkeypatch without a loaded model.
 
-        ref_text: transcript of the reference audio clip — providing this significantly
-                  improves voice cloning accuracy in Fish Speech V1.5.
-
-        Fish Speech /v1/tts contract:
-          POST {server_url}/v1/tts
-          Body: {
-            "text": str,
-            "references": [{"audio": <base64_wav>, "text": "<transcript>"}],
-            "format": "wav",
-            "normalize": true,
-            "temperature": float,
-            "top_p": float,
-            "repetition_penalty": float,
-            "max_new_tokens": int,
-            "chunk_length": int,
-            "streaming": false
-          }
-          Response: binary WAV content (Content-Type: audio/wav)
-                    OR JSON with {"audio": <base64_wav>}
+        ref_audio_path : the speaker timbre clip (spk_audio_prompt).
+        ref_text       : kept for interface compatibility; IndexTTS2 does not need
+                         a reference transcript (unlike Fish V1.5).
+        emo_vector     : 8-dim emotion vector, or None for pure timbre.
+        emo_alpha      : emotion blend strength (0..1).
         """
-        import requests
+        if self.model is None:
+            raise RuntimeError(
+                "IndexTTS2 model not loaded — use TTSEngine as a context manager "
+                "(`with TTSEngine(...) as engine:`)."
+            )
 
-        if not ref_text:
-            # Fish Speech V1.5 relies on ref_text for phoneme alignment — without it,
-            # clone fidelity drops significantly. Register transcripts via
-            # sm.set_voice() or the UI "edit transcript" field.
-            print(f"[tts]   WARN   ref_text is empty for '{ref_audio_path}' — "
-                  "zero-shot quality will be degraded. Add a transcript for this voice.")
+        tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        tmp.close()
+        try:
+            infer_kwargs = dict(
+                spk_audio_prompt=ref_audio_path,
+                text=text,
+                output_path=tmp.name,
+                verbose=False,
+            )
+            if emo_vector is not None:
+                infer_kwargs["emo_vector"] = emo_vector
+                infer_kwargs["emo_alpha"] = emo_alpha
 
-        ref_b64 = _encode_audio_b64(ref_audio_path)
+            self.model.infer(**infer_kwargs)
 
-        payload = {
-            "text":               text,
-            "references":         [{"audio": ref_b64, "text": ref_text}],
-            "format":             "wav",
-            "normalize":          True,
-            "streaming":          False,
-            "temperature":        self.cfg["temperature"],
-            "top_p":              self.cfg["top_p"],
-            "repetition_penalty": self.cfg["repetition_penalty"],
-            "max_new_tokens":     self.cfg["max_new_tokens"],
-            "chunk_length":       self.cfg["chunk_length"],
-        }
-
-        resp = requests.post(
-            f"{self.server_url}/v1/tts",
-            json=payload,
-            timeout=self.cfg["request_timeout"],
-        )
-        resp.raise_for_status()
-
-        content_type = resp.headers.get("Content-Type", "")
-        if "audio" in content_type:
-            return resp.content
-        # Some versions return JSON with base64 audio
-        data = resp.json()
-        if "audio" in data:
-            return base64.b64decode(data["audio"])
-        raise ValueError(f"Unexpected TTS response format: {content_type}\n{resp.text[:200]}")
+            with open(tmp.name, "rb") as f:
+                return f.read()
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass

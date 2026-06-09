@@ -18,7 +18,8 @@ type  PipeStatus  = PipelineStatusResponse['status']
 
 interface SavedConfig {
   projectName: string; llmPath: string
-  fishDir: string; epubPath: string; speakers: string
+  ttsDir: string; epubPath: string; speakers: string
+  fishDir?: string  // legacy key — migrated to ttsDir on load
 }
 
 // ── Status badge ──────────────────────────────────────────────────────────────
@@ -109,7 +110,7 @@ export default function Dashboard() {
   const [sideTab,   setSideTab]   = useState<'setup' | 'voices'>('setup')
   const [startError,setStartError] = useState<string | null>(null)
   const [llmPath,   setLlmPath]   = useState('C:/Users/alityan/OneDrive/Desktop/shaodw salve/models/qwen2.5-14b-instruct-q4_k_m-00001-of-00003.gguf')
-  const [fishDir,   setFishDir]   = useState('')
+  const [ttsDir,    setTtsDir]    = useState('')
   const [epubPath,  setEpubPath]  = useState('')
   const [speakers,  setSpeakers]  = useState('Sunny, Nephis, Cassie, Effie, Kai')
   const [startedAt, setStartedAt] = useState<number | null>(null)
@@ -136,7 +137,8 @@ export default function Dashboard() {
     let cfg: Partial<SavedConfig> = {}
     try { const r = localStorage.getItem(STORAGE_KEY); if (r) cfg = JSON.parse(r) } catch { /* */ }
     if (cfg.llmPath && !cfg.llmPath.includes('7b'))  setLlmPath(cfg.llmPath)
-    if (cfg.fishDir)  setFishDir(cfg.fishDir)
+    const savedTtsDir = cfg.ttsDir || cfg.fishDir   // migrate legacy fishDir
+    if (savedTtsDir) setTtsDir(savedTtsDir)
     if (cfg.epubPath) setEpubPath(cfg.epubPath)
     if (cfg.speakers) setSpeakers(cfg.speakers)
     if (cfg.projectName) {
@@ -179,7 +181,7 @@ export default function Dashboard() {
   async function handleStart() {
     if (!project) return; setStartError(null)
     try {
-      await startPipeline({ project_name: project.name, llm_model_path: llmPath, fish_speech_dir: fishDir })
+      await startPipeline({ project_name: project.name, llm_model_path: llmPath, tts_model_dir: ttsDir })
       setPipeStatus('running'); setLogOpen(true)
     } catch (err) { setStartError(err instanceof Error ? err.message : 'Failed to start') }
   }
@@ -188,14 +190,14 @@ export default function Dashboard() {
   async function handleResume() { await resumePipeline(); setPipeStatus('running') }
   async function handleStop()   { await stopPipeline();   setPipeStatus('stopped') }
 
-  function handleProjectCreated(p: Project, prog: Progress, llm: string, fish: string, spkList: string[]) {
-    setProject(p); setProgress(prog); setLlmPath(llm); setFishDir(fish)
+  function handleProjectCreated(p: Project, prog: Progress, llm: string, tts: string, spkList: string[]) {
+    setProject(p); setProgress(prog); setLlmPath(llm); setTtsDir(tts)
     setSpeakers(spkList.join(', ')); setSideTab('voices')
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      projectName: p.name, llmPath: llm, fishDir: fish, epubPath, speakers: spkList.join(', '),
+      projectName: p.name, llmPath: llm, ttsDir: tts, epubPath, speakers: spkList.join(', '),
     } satisfies SavedConfig))
     fetchChapters(p)
-    startPipeline({ project_name: p.name, llm_model_path: llm, fish_speech_dir: fish, speakers: spkList })
+    startPipeline({ project_name: p.name, llm_model_path: llm, tts_model_dir: tts, speakers: spkList })
       .then(() => { setPipeStatus('running'); setLogOpen(true) })
       .catch(err => {
         const msg = err instanceof Error ? err.message : 'Failed to start'
@@ -208,7 +210,7 @@ export default function Dashboard() {
     ? (progress.complete / ((Date.now() - startedAt) / 3_600_000)).toFixed(1)
     : null
 
-  const canStart  = project && llmPath && fishDir && ['idle','stopped','complete','error'].includes(pipeStatus)
+  const canStart  = project && llmPath && ttsDir && ['idle','stopped','complete','error'].includes(pipeStatus)
   const isRunning = pipeStatus === 'running'
 
   return (
@@ -343,7 +345,7 @@ export default function Dashboard() {
             {sideTab === 'setup' ? (
               <ProjectSetup
                 initialEpub={epubPath} initialLlm={llmPath}
-                initialFish={fishDir}  initialSpeakers={speakers}
+                initialTtsDir={ttsDir} initialSpeakers={speakers}
                 onCreated={handleProjectCreated}
               />
             ) : (
@@ -419,7 +421,7 @@ export default function Dashboard() {
                       </div>
                       <p className="text-sm font-medium text-ink-secondary">Ready to begin</p>
                       <p className="text-xs text-ink-muted leading-relaxed">
-                        Configure your EPUB, LLM model, and Fish Speech directory in the Setup panel.
+                        Configure your EPUB, LLM model, and IndexTTS2 model directory in the Setup panel.
                       </p>
                     </div>
 

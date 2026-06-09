@@ -13,10 +13,14 @@ aiosqlite==0.22.1
 # Then add PyTorch lib dir to PATH (see scripts/start.ps1)
 llama-cpp-python==0.3.25
 
-# ── Step 4: TTS Engine ────────────────────────────────────────────────────────
-# fish-speech — install from source:
-#   cd fish-speech && pip install -e .
-# Weights: fish-speech/checkpoints/fish-speech-1.5/
+# ── Step 4: TTS Engine (IndexTTS2) ────────────────────────────────────────────
+# IndexTTS2 is NOT pip-installable from PyPI — install from source:
+#   git clone https://github.com/index-tts/index-tts
+#   cd index-tts && pip install -e .
+#   (Windows: if deepspeed fails to build, the engine runs with use_deepspeed=False)
+# Weights:
+#   hf download IndexTeam/IndexTTS-2 --local-dir index-tts/checkpoints
+# Point the UI "IndexTTS2 Model Dir" / tts_model_dir at index-tts/checkpoints
 requests==2.33.0
 
 # ── Step 5: Audio Assembler ───────────────────────────────────────────────────

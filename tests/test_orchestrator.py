@@ -49,8 +49,7 @@ class FakeLLMDirector:
 
 class FakeTTSEngine:
     """Marks lines as tts_done and chapter as tts_done."""
-    def __init__(self, sm, wav_dir, fish_speech_dir=None,
-                 server_url=None, managed_server=True):
+    def __init__(self, sm, wav_dir, model_dir=None, **kwargs):
         self.sm = sm
 
     def __enter__(self):
@@ -110,7 +109,7 @@ def _make_config(**overrides) -> PipelineConfig:
     defaults = dict(
         epub_path="fake_book.epub",
         llm_model_path="fake_model.gguf",
-        fish_speech_dir="fake_fish_speech",
+        tts_model_dir="fake_tts_model",
         db_path=tmp_db.name,
         audio_wav_dir=tmp_wav,
         audio_mp3_dir=tmp_mp3,
@@ -382,8 +381,7 @@ def test_error_chapter_resumes_from_synthesize():
     class BrokenTTSOnce:
         _call_count = 0
 
-        def __init__(self, sm, wav_dir, fish_speech_dir=None,
-                     server_url=None, managed_server=True):
+        def __init__(self, sm, wav_dir, model_dir=None, **kwargs):
             self.sm = sm
             BrokenTTSOnce._call_count += 1
 

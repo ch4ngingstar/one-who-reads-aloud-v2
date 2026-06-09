@@ -5,8 +5,8 @@ import type { Project, Progress } from '@/lib/types'
 
 interface Props {
   initialEpub: string; initialLlm: string
-  initialFish: string; initialSpeakers: string
-  onCreated: (project: Project, progress: Progress, llmPath: string, fishDir: string, speakers: string[]) => void
+  initialTtsDir: string; initialSpeakers: string
+  onCreated: (project: Project, progress: Progress, llmPath: string, ttsDir: string, speakers: string[]) => void
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -21,17 +21,17 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   )
 }
 
-export default function ProjectSetup({ initialEpub, initialLlm, initialFish, initialSpeakers, onCreated }: Props) {
+export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, initialSpeakers, onCreated }: Props) {
   const [epubPath, setEpubPath] = useState(initialEpub)
   const [llmPath,  setLlmPath]  = useState(initialLlm)
-  const [fishDir,  setFishDir]  = useState(initialFish)
+  const [ttsDir,   setTtsDir]   = useState(initialTtsDir)
   const [speakers, setSpeakers] = useState(initialSpeakers)
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState<string | null>(null)
 
   useEffect(() => { setEpubPath(initialEpub) },     [initialEpub])
   useEffect(() => { setLlmPath(initialLlm) },       [initialLlm])
-  useEffect(() => { setFishDir(initialFish) },      [initialFish])
+  useEffect(() => { setTtsDir(initialTtsDir) },     [initialTtsDir])
   useEffect(() => { setSpeakers(initialSpeakers) }, [initialSpeakers])
 
   async function handleSubmit(e: React.FormEvent) {
@@ -40,9 +40,9 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialFish, ini
       const speakerList = speakers.split(',').map(s => s.trim()).filter(Boolean)
       const result = await createProject({
         epub_path: epubPath.trim(), llm_model_path: llmPath.trim(),
-        fish_speech_dir: fishDir.trim(), speakers: speakerList,
+        tts_model_dir: ttsDir.trim(), speakers: speakerList,
       })
-      onCreated(result.project, result.progress, llmPath.trim(), fishDir.trim(), speakerList)
+      onCreated(result.project, result.progress, llmPath.trim(), ttsDir.trim(), speakerList)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally { setLoading(false) }
@@ -85,12 +85,12 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialFish, ini
         />
       </Field>
 
-      <Field label="Fish Speech Directory">
+      <Field label="IndexTTS2 Model Dir" hint="checkpoints">
         <input
           className="input"
-          placeholder="fish-speech"
-          value={fishDir}
-          onChange={e => setFishDir(e.target.value)}
+          placeholder="index-tts/checkpoints"
+          value={ttsDir}
+          onChange={e => setTtsDir(e.target.value)}
           required
           spellCheck={false}
         />

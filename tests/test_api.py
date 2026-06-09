@@ -98,7 +98,7 @@ def test_create_project_epub_not_found():
     r = client.post("/api/project", json={
         "epub_path":       "/does/not/exist.epub",
         "llm_model_path":  "model.gguf",
-        "fish_speech_dir": "fish-speech",
+        "tts_model_dir":   "index-tts/checkpoints",
     })
     assert r.status_code == 400
     assert "not found" in r.json()["detail"].lower()
@@ -227,7 +227,7 @@ def test_pipeline_start_project_not_found():
     r = client.post("/api/pipeline/start", json={
         "project_name":    "nonexistent",
         "llm_model_path":  "model.gguf",
-        "fish_speech_dir": "fish-speech",
+        "tts_model_dir":   "index-tts/checkpoints",
     })
     assert r.status_code == 404
     print("  PASS test_pipeline_start_project_not_found")
@@ -244,7 +244,7 @@ def test_pipeline_start_already_running():
     r = client.post("/api/pipeline/start", json={
         "project_name":    "shadow_slave",
         "llm_model_path":  "model.gguf",
-        "fish_speech_dir": "fish-speech",
+        "tts_model_dir":   "index-tts/checkpoints",
     })
     assert r.status_code == 409
     print("  PASS test_pipeline_start_already_running")

@@ -50,7 +50,8 @@ from epub_parser   import parse_epub
 class ProjectCreate(BaseModel):
     epub_path:       str
     llm_model_path:  str
-    fish_speech_dir: str
+    tts_model_dir:   str = ""   # IndexTTS2 checkpoints dir
+    fish_speech_dir: str = ""   # deprecated alias for tts_model_dir
     speakers:        list[str] = []
     db_path:         str = "data/pipeline.db"
     audio_wav_dir:   str = "data/audio"
@@ -60,12 +61,17 @@ class ProjectCreate(BaseModel):
 class PipelineStart(BaseModel):
     project_name:       str
     llm_model_path:     str
-    fish_speech_dir:    str
+    tts_model_dir:      str = ""   # IndexTTS2 checkpoints dir
+    fish_speech_dir:    str = ""   # deprecated alias for tts_model_dir
     speakers:           list[str] = []
     chapter_range:      Optional[list[int]] = None   # [start, end] inclusive
     output_format:      str   = "mp3"
-    managed_tts_server: bool  = True
     vram_check_enabled: bool  = True
+
+    @property
+    def resolved_model_dir(self) -> str:
+        """Prefer the new field; fall back to the deprecated fish_speech_dir."""
+        return self.tts_model_dir or self.fish_speech_dir
 
 
 class VoiceSet(BaseModel):
@@ -280,17 +286,23 @@ async def start_pipeline(
 
     ch_range = tuple(req.chapter_range) if req.chapter_range else None
 
+    model_dir = req.resolved_model_dir
+    if not model_dir:
+        raise HTTPException(
+            status_code=400,
+            detail="tts_model_dir is required (the IndexTTS2 checkpoints directory)."
+        )
+
     config = PipelineConfig(
         epub_path         = project["source_epub"],
         llm_model_path    = req.llm_model_path,
-        fish_speech_dir   = req.fish_speech_dir,
+        tts_model_dir     = model_dir,
         db_path           = "data/pipeline.db",
         audio_wav_dir     = "data/audio",
         audio_mp3_dir     = "data/output",
         speakers          = req.speakers,
         chapter_range     = ch_range,
         output_format     = req.output_format,
-        managed_tts_server= req.managed_tts_server,
         vram_check_enabled= req.vram_check_enabled,
     )
 
