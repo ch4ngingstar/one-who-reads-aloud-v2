@@ -18,6 +18,9 @@ ui/tsconfig.tsbuildinfo
 # ─── External dependencies (cloned/downloaded separately) ──
 # Fish Speech is a nested git repo cloned per CLAUDE.md setup
 fish-speech/
+# IndexTTS2 is a nested git repo (clone + ~8 GB weights) installed per CLAUDE.md;
+# its 4 local patches (pyproject.toml, infer_v2.py) are documented in memory, not here.
+index-tts/
 # GGUF model weights — multi-GB, downloaded separately
 models/
 
