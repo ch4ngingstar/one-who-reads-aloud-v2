@@ -1,7 +1,7 @@
 'use client'
-import { useState } from 'react'
-import { audioUrl, deleteChapterAudio, resetChapter } from '@/lib/api'
-import AudioPlayer from '@/components/AudioPlayer'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { deleteChapterAudio, resetChapter } from '@/lib/api'
+import ConfirmButton from '@/components/ConfirmButton'
 import type { Chapter, ChapterStatus } from '@/lib/types'
 
 // ── Japanese Minimalist palette — monochrome + two accents ───────────────────
@@ -126,6 +126,9 @@ const STAGE_LABEL: Record<Stage, string> = {
   assemble:   'Assembling',
 }
 
+// First render batch; the sentinel loads another batch as it scrolls into view.
+const RENDER_CHUNK = 120
+
 interface TtsProg { done: number; total: number }
 interface Props {
   chapters: Chapter[]
@@ -134,6 +137,16 @@ interface Props {
   ttsProgress?:    Record<number, TtsProg>
   onDelete?:       (chapterId: number) => void
   onRedo?:         (chapterId: number) => void
+  /** Route a chapter's audio to the global player bar. */
+  onPlay?:         (chapterId: number) => void
+  /** Queue every finished chapter into the global player. */
+  onPlayAll?:      () => void
+  /** Chapter currently loaded in the global player (shows the equalizer). */
+  playingChapterId?: number | null
+  playerPlaying?:    boolean
+  /** Minimap click — grid clears filters, scrolls to the card, flashes it. */
+  focusChapterId?:  number | null
+  onFocusHandled?: () => void
 }
 
 // ── TTS progress bar ──────────────────────────────────────────────────────────
@@ -153,40 +166,28 @@ function TtsBar({ done, total }: TtsProg) {
 }
 
 // ── Chapter card ──────────────────────────────────────────────────────────────
-function ChapterCard({
-  chapter, isActive, activeStage, ttsProg, onDelete, onRedo,
+const ChapterCard = memo(function ChapterCard({
+  chapter, isActive, activeStage, ttsProg, isPlaying, playerPlaying, flash,
+  onDelete, onRedo, onPlay,
 }: {
   chapter: Chapter; isActive: boolean; activeStage?: Stage | null; ttsProg?: TtsProg
-  onDelete?: () => void; onRedo?: () => void
+  isPlaying: boolean; playerPlaying: boolean; flash: boolean
+  // id-taking callbacks stay referentially stable so memo() actually skips renders
+  onDelete?: (id: number) => void; onRedo?: (id: number) => void; onPlay?: (id: number) => void
 }) {
-  const [showPlayer, setShowPlayer] = useState(false)
-  const [deleting,   setDeleting]   = useState(false)
-  const [redoing,    setRedoing]    = useState(false)
-
   const isComplete  = chapter.status === 'complete'
   const hasAudio    = isComplete && chapter.output_audio_path != null
   const showLiveTts = isActive && ttsProg && ttsProg.total > 0
   const isDone      = ['tts_done', 'assembled', 'complete'].includes(chapter.status)
 
-  async function handleDelete() {
-    if (!confirm('Delete the audio file for this chapter?')) return
-    setDeleting(true)
-    try { await deleteChapterAudio(chapter.id); onDelete?.() }
-    finally { setDeleting(false) }
-  }
-
-  async function handleRedo() {
-    if (!confirm('Reset this chapter and re-run it from scratch?')) return
-    setRedoing(true)
-    try { await resetChapter(chapter.id); onRedo?.() }
-    finally { setRedoing(false) }
-  }
-
   const leftColor = isActive ? '#A0A0A8' : STATUS_COLOR[chapter.status]
 
   return (
     <div
-      className={`glass-card p-5 flex flex-col gap-3 transition-all duration-200 ${
+      data-chapter-card={chapter.id}
+      className={`glass-card cv-auto p-5 flex flex-col gap-3 transition-all duration-200 ${
+        flash ? 'animate-flash-highlight' : ''
+      } ${
         isActive
           ? 'animate-cyber-aura'
           : isComplete
@@ -201,6 +202,11 @@ function ChapterCard({
           {String(chapter.chapter_index + 1).padStart(3, '0')}
         </span>
         <div className="flex items-center gap-1.5">
+          {isPlaying && (
+            <span className={`equalizer ${playerPlaying ? '' : 'equalizer--paused'}`} aria-label="Playing" role="img">
+              <span /><span /><span />
+            </span>
+          )}
           {/* Soul Core status diamond */}
           <SoulCore
             color={leftColor}
@@ -242,7 +248,7 @@ function ChapterCard({
         </span>
       )}
 
-      {/* Complete — file info + player */}
+      {/* Complete — file info + play */}
       {isComplete && (
         <div className="pt-3 space-y-2" style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
           <div className="flex items-center justify-between">
@@ -254,41 +260,35 @@ function ChapterCard({
               <span className="text-[10px] text-ink-ghost italic">file deleted</span>
             )}
             {hasAudio ? (
-              <button
-                className="btn-danger py-1 px-1.5 disabled:opacity-40"
-                onClick={handleDelete}
-                disabled={deleting}
-                aria-label="Delete audio"
+              <ConfirmButton
+                className="btn-danger py-1 px-1.5"
+                confirmClassName="btn-danger py-1 px-2 text-[9px]"
+                confirmLabel="Delete?"
+                onConfirm={async () => { await deleteChapterAudio(chapter.id); onDelete?.(chapter.id) }}
+                ariaLabel="Delete audio"
                 title="Delete from disk"
               >
-                {deleting ? '…' : <RazorSlash size={9} />}
-              </button>
+                <RazorSlash size={9} />
+              </ConfirmButton>
             ) : (
-              <button
-                className="btn py-1 px-1.5 disabled:opacity-40"
-                onClick={handleRedo}
-                disabled={redoing}
-                aria-label="Redo chapter"
+              <ConfirmButton
+                className="btn py-1 px-1.5"
+                confirmClassName="btn py-1 px-2 text-[9px]"
+                confirmLabel="Redo?"
+                onConfirm={async () => { await resetChapter(chapter.id); onRedo?.(chapter.id) }}
+                ariaLabel="Redo chapter"
                 title="Reset and re-run chapter"
               >
-                {redoing ? '…' : <RebirthRune size={11} />}
-              </button>
+                <RebirthRune size={11} />
+              </ConfirmButton>
             )}
           </div>
 
           {hasAudio && (
-            !showPlayer ? (
-              <button className="btn-gold w-full gap-2" onClick={() => setShowPlayer(true)}>
-                <RuneOfSight size={13} />
-                <span>Preview</span>
-              </button>
-            ) : (
-              <AudioPlayer
-                src={audioUrl(chapter.id)}
-                onEnded={() => setShowPlayer(false)}
-                onClose={() => setShowPlayer(false)}
-              />
-            )
+            <button className="btn-gold w-full gap-2" onClick={() => onPlay?.(chapter.id)} aria-pressed={isPlaying}>
+              <RuneOfSight size={13} />
+              <span>{isPlaying ? 'Playing' : 'Play'}</span>
+            </button>
           )}
         </div>
       )}
@@ -307,27 +307,36 @@ function ChapterCard({
               {cleanError(chapter.error_message)}
             </p>
           )}
-          <button
-            className="btn py-1 px-1.5 flex-shrink-0 disabled:opacity-40"
-            onClick={handleRedo}
-            disabled={redoing}
-            aria-label="Retry chapter"
+          <ConfirmButton
+            className="btn py-1 px-1.5 flex-shrink-0"
+            confirmClassName="btn py-1 px-2 text-[9px] flex-shrink-0"
+            confirmLabel="Retry?"
+            onConfirm={async () => { await resetChapter(chapter.id); onRedo?.(chapter.id) }}
+            ariaLabel="Retry chapter"
             title="Reset and re-run chapter"
           >
-            {redoing ? '…' : <RebirthRune size={11} />}
-          </button>
+            <RebirthRune size={11} />
+          </ConfirmButton>
         </div>
       )}
     </div>
   )
-}
+})
 
-// ── Grid with filter bar + search ─────────────────────────────────────────────
+// ── Grid with filter bar + search + sort ──────────────────────────────────────
 export default function ChapterGrid({
-  chapters, activeChapterId, activeStage, ttsProgress = {}, onDelete, onRedo,
+  chapters, activeChapterId, activeStage, ttsProgress = {},
+  onDelete, onRedo, onPlay, onPlayAll,
+  playingChapterId = null, playerPlaying = false,
+  focusChapterId = null, onFocusHandled,
 }: Props) {
-  const [filter, setFilter] = useState<Filter>('all')
-  const [query,  setQuery]  = useState('')
+  const [filter,   setFilter]   = useState<Filter>('all')
+  const [query,    setQuery]    = useState('')
+  const [sortDesc, setSortDesc] = useState(false)
+  const [limit,    setLimit]    = useState(RENDER_CHUNK)
+  const [flashId,  setFlashId]  = useState<number | null>(null)
+  const scrollRef   = useRef<HTMLDivElement>(null)
+  const sentinelRef = useRef<HTMLDivElement>(null)
 
   const counts = chapters.reduce<Partial<Record<ChapterStatus, number>>>(
     (acc, ch) => { acc[ch.status] = (acc[ch.status] ?? 0) + 1; return acc },
@@ -337,14 +346,59 @@ export default function ChapterGrid({
     FILTER_STATUSES[key].reduce((sum, s) => sum + (counts[s] ?? 0), 0)
 
   const q = query.trim().toLowerCase()
-  const displayed = chapters.filter(ch => {
-    if (filter !== 'all' && !FILTER_STATUSES[filter].includes(ch.status)) return false
-    if (!q) return true
-    // Match against the title or the 1-based chapter number.
-    return ch.title.toLowerCase().includes(q)
-        || String(ch.chapter_index + 1) === q
-        || String(ch.chapter_index + 1).padStart(3, '0').includes(q)
-  })
+  const displayed = useMemo(() => {
+    const list = chapters.filter(ch => {
+      if (filter !== 'all' && !FILTER_STATUSES[filter].includes(ch.status)) return false
+      if (!q) return true
+      // Match against the title or the 1-based chapter number.
+      return ch.title.toLowerCase().includes(q)
+          || String(ch.chapter_index + 1) === q
+          || String(ch.chapter_index + 1).padStart(3, '0').includes(q)
+    })
+    return sortDesc ? [...list].sort((a, b) => b.chapter_index - a.chapter_index) : list
+  }, [chapters, filter, q, sortDesc])
+
+  // Incremental render — observe the sentinel inside the scroll container and
+  // grow the window. jsdom has no IntersectionObserver: render everything there.
+  const hasIO = typeof IntersectionObserver !== 'undefined'
+  useEffect(() => {
+    if (!hasIO) return
+    const sentinel = sentinelRef.current
+    if (!sentinel) return
+    const io = new IntersectionObserver(
+      entries => { if (entries.some(e => e.isIntersecting)) setLimit(l => l + RENDER_CHUNK) },
+      { root: scrollRef.current, rootMargin: '600px' },
+    )
+    io.observe(sentinel)
+    return () => io.disconnect()
+  }, [hasIO, displayed.length, limit])
+
+  const visible = hasIO ? displayed.slice(0, limit) : displayed
+
+  // Minimap focus — clear filters so the card exists, grow the window past it,
+  // then scroll + flash once the DOM has caught up.
+  useEffect(() => {
+    if (focusChapterId == null) return
+    setFilter('all'); setQuery(''); setSortDesc(false)
+    const index = chapters.findIndex(c => c.id === focusChapterId)
+    if (index >= 0) setLimit(l => Math.max(l, index + RENDER_CHUNK))
+    const t = setTimeout(() => {
+      const el = document.querySelector(`[data-chapter-card="${focusChapterId}"]`)
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+      setFlashId(focusChapterId)
+      onFocusHandled?.()
+    }, 60)
+    return () => clearTimeout(t)
+  }, [focusChapterId, chapters, onFocusHandled])
+
+  // Let the flash animation finish, then drop the class so it can re-fire.
+  useEffect(() => {
+    if (flashId == null) return
+    const t = setTimeout(() => setFlashId(null), 1700)
+    return () => clearTimeout(t)
+  }, [flashId])
 
   const filters: { key: Filter; label: string }[] = [
     { key: 'all',      label: `All ${chapters.length}`            },
@@ -354,6 +408,8 @@ export default function ChapterGrid({
     { key: 'complete', label: `Done ${countFor('complete')}`      },
     { key: 'error',    label: `Error ${countFor('error')}`        },
   ]
+
+  const playableCount = chapters.filter(c => c.status === 'complete' && c.output_audio_path != null).length
 
   return (
     <div className="flex flex-col gap-4 h-full">
@@ -375,6 +431,22 @@ export default function ChapterGrid({
             </button>
           )
         })}
+
+        <button
+          className="btn-filter"
+          onClick={() => setSortDesc(d => !d)}
+          title={sortDesc ? 'Newest chapter first — click for oldest first' : 'Oldest chapter first — click for newest first'}
+          aria-label="Toggle sort order"
+        >
+          № {sortDesc ? '↓' : '↑'}
+        </button>
+
+        {onPlayAll && playableCount > 0 && (
+          <button className="btn-gold gap-1.5 py-[5px]" onClick={onPlayAll} title={`Queue all ${playableCount} finished chapters`}>
+            <RuneOfSight size={12} />
+            <span>Play All</span>
+          </button>
+        )}
 
         {/* Search — by title or chapter number */}
         <div className="relative ml-auto">
@@ -402,20 +474,32 @@ export default function ChapterGrid({
         </div>
       ) : (
         <div
-          className="grid gap-3 overflow-y-auto pr-1"
+          ref={scrollRef}
+          className="grid gap-3 overflow-y-auto pr-1 content-start"
           style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}
         >
-          {displayed.map(ch => (
+          {visible.map(ch => (
             <ChapterCard
               key={ch.id}
               chapter={ch}
               isActive={ch.id === activeChapterId}
               activeStage={activeStage}
               ttsProg={ttsProgress[ch.id]}
-              onDelete={() => onDelete?.(ch.id)}
-              onRedo={() => onRedo?.(ch.id)}
+              isPlaying={ch.id === playingChapterId}
+              playerPlaying={playerPlaying}
+              flash={ch.id === flashId}
+              onDelete={onDelete}
+              onRedo={onRedo}
+              onPlay={onPlay}
             />
           ))}
+          {hasIO && visible.length < displayed.length && (
+            <div ref={sentinelRef} className="col-span-full h-8 flex items-center justify-center">
+              <span className="text-[10px] text-ink-ghost font-mono">
+                {visible.length} / {displayed.length} — scroll for more
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>

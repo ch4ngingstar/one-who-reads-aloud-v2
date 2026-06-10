@@ -9,8 +9,12 @@ import ProjectSetup      from '@/components/ProjectSetup'
 import VoiceMapper       from '@/components/VoiceMapper'
 import ChapterGrid       from '@/components/ChapterGrid'
 import LiveLog           from '@/components/LiveLog'
+import EmptyState        from '@/components/EmptyState'
+import PlayerBar         from '@/components/PlayerBar'
+import StatsBar, { formatEta } from '@/components/StatsBar'
+import Toasts, { type Toast, type ToastTone } from '@/components/Toasts'
 import type {
-  Project, Progress, Chapter, Voice, SSEEvent, PipelineStatusResponse, ChapterStatus, GenOptions,
+  Project, Progress, Chapter, Voice, SSEEvent, PipelineStatusResponse, GenOptions,
 } from '@/lib/types'
 
 const STORAGE_KEY = 'pipeline_cfg'
@@ -69,51 +73,6 @@ function ProgressBar({ pct, running }: { pct: number; running: boolean }) {
   )
 }
 
-// ── Chapter pipeline strip ────────────────────────────────────────────────────
-const STRIP_COLOR: Record<ChapterStatus, string> = {
-  pending:   '#27272A',
-  diarized:  '#52525B',
-  tts_done:  '#71717A',
-  assembled: '#71717A',
-  complete:  '#D4D4D8',
-  error:     '#991B1B',
-}
-
-function ChapterStrip({ chapters, activeId }: { chapters: Chapter[]; activeId: number | null }) {
-  if (!chapters.length) return null
-  return (
-    <div className="flex gap-[1px] mt-2 overflow-hidden" style={{ height: '2px' }} aria-hidden>
-      {chapters.map(ch => (
-        <div
-          key={ch.id}
-          className="flex-1 min-w-[1px] transition-colors duration-500"
-          style={{
-            backgroundColor: STRIP_COLOR[ch.status],
-            opacity: ch.id === activeId ? 1 : 0.55,
-          }}
-          title={`${ch.chapter_index + 1}. ${ch.title} (${ch.status})`}
-        />
-      ))}
-    </div>
-  )
-}
-
-// ── ETA helper ────────────────────────────────────────────────────────────────
-function formatEta(seconds: number): string {
-  if (!isFinite(seconds) || seconds <= 0) return ''
-  const h = Math.floor(seconds / 3600)
-  const m = Math.round((seconds % 3600) / 60)
-  if (h > 0) return `~${h}h ${m}m left`
-  if (m > 0) return `~${m}m left`
-  return '~1m left'
-}
-
-const STAGE_LABEL: Record<Stage, string> = {
-  diarize:    'Diarizing',
-  synthesize: 'Synthesizing',
-  assemble:   'Assembling',
-}
-
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const [project,    setProject]    = useState<Project | null>(null)
@@ -137,6 +96,20 @@ export default function Dashboard() {
   const [outputFormat, setOutputFormat] = useState('mp3')
   const [vramCheck,    setVramCheck]    = useState(true)
   const [startedAt, setStartedAt] = useState<number | null>(null)
+
+  // Global player + Spell toasts + minimap focus
+  const [playingChId,   setPlayingChId]   = useState<number | null>(null)
+  const [playerPlaying, setPlayerPlaying] = useState(false)
+  const [toasts,        setToasts]        = useState<Toast[]>([])
+  const [focusChId,     setFocusChId]     = useState<number | null>(null)
+  const toastSeq = useRef(0)
+
+  const pushToast = useCallback((tone: ToastTone, message: string) => {
+    setToasts(prev => [...prev.slice(-4), { id: ++toastSeq.current, tone, message }])
+  }, [])
+  const dismissToast = useCallback((id: number) => {
+    setToasts(prev => prev.filter(t => t.id !== id))
+  }, [])
 
   const fetchChapters = useCallback(async (p: Project) => {
     try { const { chapters: chs } = await getChapters(p.id); setChapters(chs) } catch { /* silent */ }
@@ -233,11 +206,23 @@ export default function Dashboard() {
       }))
     }
     if (e.type === 'chapter_done')     { setActiveChId(null); setActiveStage(null); refreshChapters(); refreshProgress() }
-    if (e.type === 'chapter_error')    { setActiveChId(null); setActiveStage(null); refreshChapters() }
-    if (e.type === 'pipeline_done')    { setPipeStatus('complete'); setActiveChId(null); setActiveStage(null); refreshChapters(); refreshProgress() }
+    if (e.type === 'chapter_error') {
+      setActiveChId(null); setActiveStage(null); refreshChapters()
+      pushToast('crimson', `Chapter ${e.chapter_id ?? '?'} has fallen — ${String(e.error ?? 'unknown error').slice(0, 120)}`)
+    }
+    if (e.type === 'pipeline_done') {
+      setPipeStatus('complete'); setActiveChId(null); setActiveStage(null); refreshChapters(); refreshProgress()
+      pushToast('chrome', `Congratulations, Sleeper. ${e.success ?? 0} chapters transcribed.`)
+    }
     if (e.type === 'pipeline_stopped') { setPipeStatus('stopped');  setActiveChId(null); setActiveStage(null); refreshChapters(); refreshProgress() }
-    if (e.type === 'pipeline_error')   setPipeStatus('error')
-  }, [logOpen, refreshChapters, refreshProgress])
+    if (e.type === 'pipeline_error') {
+      setPipeStatus('error')
+      pushToast('crimson', `The Nightmare collapsed: ${String(e.error ?? 'unknown error').slice(0, 120)}`)
+    }
+    if (e.type === 'vram_warning') {
+      pushToast('gold', `The Spell warns: VRAM ${e.used_mb} MB exceeds the ${e.threshold_mb} MB barrier.`)
+    }
+  }, [logOpen, refreshChapters, refreshProgress, pushToast])
 
   useSSE(pipeStatus === 'running' || pipeStatus === 'paused', handleSSE)
 
@@ -301,13 +286,21 @@ export default function Dashboard() {
     return formatEta(avg * remaining)
   }, [chapters, progress, pipeStatus])
 
-  const activeChapter = activeChId != null ? chapters.find(c => c.id === activeChId) : undefined
+  // Listenable chapters, in book order — the global player's queue.
+  const playerQueue = useMemo(
+    () => chapters
+      .filter(c => c.status === 'complete' && c.output_audio_path != null)
+      .sort((a, b) => a.chapter_index - b.chapter_index),
+    [chapters],
+  )
 
   const canStart  = project && llmPath && ttsDir && ['idle','stopped','complete','error'].includes(pipeStatus)
   const isRunning = pipeStatus === 'running'
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">
+
+      <Toasts toasts={toasts} onDismiss={dismissToast} />
 
       {/* ══════════════════════════════════════════════════════ HEADER ═══ */}
       <header className="flex-shrink-0 glass-panel">
@@ -318,11 +311,11 @@ export default function Dashboard() {
             <div className="flex items-center gap-2.5 flex-shrink-0 select-none">
               <span className="text-white/20 text-lg leading-none animate-twinkle" aria-hidden>◈</span>
               <div>
-                <div className="text-[11px] font-semibold text-white tracking-[0.1em] uppercase leading-none">
-                  Audiobook Pipeline
-                </div>
-                <div className="text-[9px] text-white/18 tracking-[0.2em] uppercase leading-none mt-0.5 select-none">
+                <div className="font-display text-[13px] font-semibold text-white/90 tracking-[0.22em] uppercase leading-none">
                   Shadow Slave
+                </div>
+                <div className="text-[9px] text-white/18 tracking-[0.2em] uppercase leading-none mt-1 select-none">
+                  Audiobook Pipeline
                 </div>
               </div>
             </div>
@@ -410,8 +403,8 @@ export default function Dashboard() {
             style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
           >
             <span className="text-white/15 animate-twinkle text-[9px]" aria-hidden>✦</span>
-            <span className="text-[9px] text-white/20 tracking-[0.25em] uppercase font-medium">
-              Shadow Slave
+            <span className="font-display text-[9px] text-white/25 tracking-[0.3em] uppercase">
+              The Dream Realm
             </span>
             <span className="text-white/15 animate-twinkle text-[9px] [animation-delay:1.5s]" aria-hidden>✦</span>
           </div>
@@ -475,100 +468,24 @@ export default function Dashboard() {
         {/* ─── Main ─────────────────────────────────────────────────── */}
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
 
-          {/* Stats bar */}
           {progress && (
-            <div
-              className="flex-shrink-0 px-6 py-4"
-              style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}
-            >
-              <div className="flex items-baseline gap-6 flex-wrap">
-                {[
-                  { label: 'Total',   value: progress.total,                       color: 'text-ink-secondary' },
-                  { label: 'Pending', value: progress.pending,                      color: 'text-[#52525B]'     },
-                  { label: 'Active',  value: progress.diarized + progress.tts_done + progress.assembled, color: 'text-[#A0A0A8]' },
-                  { label: 'Done',    value: progress.complete,                     color: 'text-[#D4D4D8]'     },
-                  { label: 'Error',   value: progress.error,                        color: 'text-[#991B1B]'     },
-                ].map(({ label, value, color }) => (
-                  <div key={label} className="flex items-baseline gap-1.5">
-                    <span className={`tech text-2xl tabular-nums leading-none ${color}`}>{value}</span>
-                    <span className="text-[9px] text-ink-ghost uppercase tracking-[0.14em]">{label}</span>
-                  </div>
-                ))}
-
-                <div className="ml-auto flex items-center gap-4">
-                  {eta && (
-                    <span className="tech text-sm text-ink-ghost tabular-nums tracking-wide">{eta}</span>
-                  )}
-                  {throughput && (
-                    <span className="tech text-sm text-ink-muted tabular-nums tracking-wide">
-                      {throughput}
-                      <span className="text-ink-ghost text-[11px]"> ch/hr</span>
-                    </span>
-                  )}
-                  <span className="tech text-base tabular-nums text-ink-secondary">
-                    {progress.pct_complete}%
-                  </span>
-                </div>
-              </div>
-
-              {/* Live "now playing" line */}
-              {isRunning && activeChapter && (
-                <div className="flex items-center gap-2 mt-2 text-[10px] font-mono text-ink-muted animate-fade-in">
-                  <span className="status-dot bg-dot-running animate-pulse-slow flex-shrink-0" />
-                  <span className="text-ink-ghost uppercase tracking-[0.14em] text-[9px]">
-                    {activeStage ? STAGE_LABEL[activeStage] : 'Processing'}
-                  </span>
-                  <span className="truncate max-w-[400px] text-ink-secondary">
-                    {String(activeChapter.chapter_index + 1).padStart(3, '0')} · {activeChapter.title}
-                  </span>
-                </div>
-              )}
-
-              <div className="weaver-thread animate-thread-pulse mt-3 mb-1" />
-              <ChapterStrip chapters={chapters} activeId={activeChId} />
-            </div>
+            <StatsBar
+              progress={progress}
+              chapters={chapters}
+              activeChId={activeChId}
+              activeStage={activeStage}
+              isRunning={isRunning}
+              eta={eta}
+              throughput={throughput}
+              onSelectChapter={setFocusChId}
+            />
           )}
 
           {/* Chapter grid / empty state */}
           <div className="flex-1 overflow-hidden p-6">
             {chapters.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center gap-6">
-                {project ? (
-                  <div className="flex items-center gap-2 text-[10px] text-ink-ghost font-mono">
-                    <span className="text-white/15 animate-twinkle">✦</span>
-                    <span>Loading chapters…</span>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-5 max-w-[280px] text-center animate-slide-up">
-
-                    {/* Floating logo cluster */}
-                    <div className="relative w-20 h-20 flex items-center justify-center">
-                      <span className="text-white/15 animate-twinkle text-xs absolute top-0 right-0 select-none" aria-hidden>✦</span>
-                      <span className="text-white/12 animate-twinkle text-[9px] absolute bottom-1 left-0 select-none [animation-delay:2s]" aria-hidden>✧</span>
-                      <span className="text-white/10 animate-twinkle text-[8px] absolute top-2 left-2 select-none [animation-delay:1.2s]" aria-hidden>✦</span>
-                      <span className="text-white/10 text-6xl select-none animate-drift" aria-hidden>◈</span>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <div className="text-[9px] text-white/18 tracking-[0.3em] uppercase select-none">
-                        ✦ Shadow Slave ✦
-                      </div>
-                      <p className="text-sm font-medium text-ink-secondary">Ready to begin</p>
-                      <p className="text-xs text-ink-muted leading-relaxed">
-                        Configure your EPUB, LLM model, and IndexTTS2 model directory in the Setup panel.
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2 text-[9px] font-mono tracking-widest text-ink-ghost/60">
-                      {['EPUB', 'DIARIZE', 'TTS', 'ASSEMBLE'].map((s, i, a) => (
-                        <span key={s} className="flex items-center gap-2">
-                          <span className={i === 0 ? 'text-white/28' : ''}>{s}</span>
-                          {i < a.length - 1 && <span style={{ color: 'rgba(255,255,255,0.1)' }}>→</span>}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <EmptyState hasProject={project != null} />
               </div>
             ) : (
               <ChapterGrid
@@ -578,17 +495,32 @@ export default function Dashboard() {
                 ttsProgress={ttsProgress}
                 onDelete={refreshChapters}
                 onRedo={refreshChapters}
+                onPlay={setPlayingChId}
+                onPlayAll={() => { if (playerQueue.length) setPlayingChId(playerQueue[0].id) }}
+                playingChapterId={playingChId}
+                playerPlaying={playerPlaying}
+                focusChapterId={focusChId}
+                onFocusHandled={() => setFocusChId(null)}
               />
             )}
           </div>
         </main>
       </div>
 
+      {/* ══════════════════════════════════════════════════════ PLAYER ════ */}
+      <PlayerBar
+        queue={playerQueue}
+        currentId={playingChId}
+        onCurrentChange={setPlayingChId}
+        onPlayingChange={setPlayerPlaying}
+      />
+
       {/* ══════════════════════════════════════════════════════ LIVE LOG ═══ */}
       <LiveLog
         events={events}
         open={logOpen}
         onToggle={() => setLogOpen(v => { if (v) logUserClosed.current = true; return !v })}
+        onClear={() => setEvents([])}
       />
     </div>
   )

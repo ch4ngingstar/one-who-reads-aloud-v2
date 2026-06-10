@@ -1,6 +1,7 @@
 'use client'
-import { useState } from 'react'
-import { uploadVoice, deleteVoice, updateVoiceRefText } from '@/lib/api'
+import { useEffect, useRef, useState } from 'react'
+import { uploadVoice, deleteVoice, updateVoiceRefText, voiceAudioUrl } from '@/lib/api'
+import ConfirmButton from '@/components/ConfirmButton'
 import type { Voice } from '@/lib/types'
 
 const DEFAULT_SPEAKERS = ['Narrator', 'Sunny', 'Nephis', 'Cassie', 'Effie', 'Kai', 'Morgan']
@@ -54,6 +55,17 @@ function RazorSlash({ size = 10 }: { size?: number }) {
       <line x1="1.5" y1="1.5" x2="10.5" y2="10.5" strokeWidth="2" />
       <line x1="10.5" y1="1"  x2="0.5"  y2="11"   strokeWidth="0.9" opacity="0.55" />
       <line x1="7.5"  y1="9"  x2="11"   y2="12.5"  strokeWidth="1.5" opacity="0.28" />
+    </svg>
+  )
+}
+
+// Echo Rune — sound-wave arcs, voice preview
+function EchoRune({ size = 11 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeLinecap="square" aria-hidden>
+      <polygon points="1,4.5 4,4.5 6.5,2 6.5,10 4,7.5 1,7.5" strokeWidth="0.9" />
+      <path d="M8.5,4 A2.6,2.6 0 0,1 8.5,8"   strokeWidth="0.9" />
+      <path d="M10,2.5 A4.6,4.6 0 0,1 10,9.5" strokeWidth="0.7" opacity="0.6" />
     </svg>
   )
 }
@@ -112,6 +124,31 @@ export default function VoiceMapper({ voices, onUpdate }: { voices: Voice[]; onU
   const [error,         setError]         = useState<string | null>(null)
   const [newSpeaker,    setNewSpeaker]    = useState('')
   const [extraSpeakers, setExtraSpeakers] = useState<string[]>([])
+  const [previewing,    setPreviewing]    = useState<string | null>(null)
+  const previewRef = useRef<HTMLAudioElement | null>(null)
+
+  // One shared element — starting a preview stops whichever clip was playing.
+  useEffect(() => () => { previewRef.current?.pause(); previewRef.current = null }, [])
+
+  function togglePreview(speaker: string) {
+    if (previewing === speaker) {
+      previewRef.current?.pause()
+      previewRef.current = null
+      setPreviewing(null)
+      return
+    }
+    previewRef.current?.pause()
+    const audio = new Audio(voiceAudioUrl(speaker))
+    audio.onended = () => setPreviewing(p => (p === speaker ? null : p))
+    audio.onerror = () => {
+      setPreviewing(p => (p === speaker ? null : p))
+      setError(`Could not play the reference clip for ${speaker}.`)
+    }
+    previewRef.current = audio
+    setError(null)
+    setPreviewing(speaker)
+    void audio.play().catch(() => setPreviewing(null))
+  }
 
   const voiceMap    = Object.fromEntries(voices.map(v => [v.speaker, v]))
   const allSpeakers = Array.from(new Set([...DEFAULT_SPEAKERS, ...extraSpeakers, ...voices.map(v => v.speaker)]))
@@ -131,7 +168,6 @@ export default function VoiceMapper({ voices, onUpdate }: { voices: Voice[]; onU
   }
 
   async function handleDelete(speaker: string) {
-    if (!confirm(`Remove the voice mapping for ${speaker}? (The audio file stays on disk.)`)) return
     setError(null)
     try { await deleteVoice(speaker); onUpdate() }
     catch (err) { setError(err instanceof Error ? err.message : 'Delete failed') }
@@ -223,6 +259,19 @@ export default function VoiceMapper({ voices, onUpdate }: { voices: Voice[]; onU
 
                 {/* Actions */}
                 <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {voice && (
+                    <button
+                      className={`btn py-1 px-2 ${previewing === speaker ? '!text-[#D4D4D8] !border-[#52525B]' : ''}`}
+                      onClick={() => togglePreview(speaker)}
+                      aria-label={previewing === speaker ? `Stop ${speaker} preview` : `Preview ${speaker} voice`}
+                      aria-pressed={previewing === speaker}
+                      title="Play reference clip"
+                    >
+                      {previewing === speaker
+                        ? <span className="equalizer" aria-hidden><span /><span /><span /></span>
+                        : <EchoRune size={11} />}
+                    </button>
+                  )}
                   <button
                     className="btn text-[10px] py-1 px-2.5 gap-1.5"
                     onClick={() => pickFile(speaker)}
@@ -235,13 +284,16 @@ export default function VoiceMapper({ voices, onUpdate }: { voices: Voice[]; onU
                     }
                   </button>
                   {voice && (
-                    <button
+                    <ConfirmButton
                       className="btn-danger py-1 px-2"
-                      onClick={() => handleDelete(speaker)}
-                      aria-label={`Remove ${speaker}`}
+                      confirmClassName="btn-danger py-1 px-2 text-[9px]"
+                      confirmLabel="Remove?"
+                      onConfirm={() => handleDelete(speaker)}
+                      ariaLabel={`Remove ${speaker}`}
+                      title="Remove mapping (audio file stays on disk)"
                     >
                       <RazorSlash size={9} />
-                    </button>
+                    </ConfirmButton>
                   )}
                 </div>
               </div>

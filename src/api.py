@@ -521,6 +521,32 @@ async def delete_voice(speaker: str, sm: StateManager = Depends(get_sm)):
 
 # ── Audio file serving ────────────────────────────────────────────────────────
 
+_VOICE_MEDIA_TYPES = {
+    ".wav":  "audio/wav",
+    ".mp3":  "audio/mpeg",
+    ".flac": "audio/flac",
+    ".ogg":  "audio/ogg",
+}
+
+
+@app.get("/api/voices/{speaker}/audio")
+async def serve_voice_audio(speaker: str, sm: StateManager = Depends(get_sm)):
+    """Stream a speaker's reference clip so the UI can preview voices."""
+    voice = sm.get_voice_map().get(speaker)
+    if voice is None:
+        raise HTTPException(status_code=404, detail=f"Voice '{speaker}' not found.")
+
+    path = _resolve_data_path(voice["path"])
+    if not path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Reference clip for '{speaker}' is missing on disk: {voice['path']}",
+        )
+
+    media_type = _VOICE_MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream")
+    return FileResponse(str(path), media_type=media_type, filename=path.name)
+
+
 @app.get("/api/audio/{chapter_id}")
 async def serve_audio(
     chapter_id: int,

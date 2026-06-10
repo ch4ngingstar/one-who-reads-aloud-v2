@@ -210,6 +210,40 @@ def test_delete_voice_not_found():
     print("  PASS test_delete_voice_not_found")
 
 
+def test_voice_audio_serves_clip():
+    sm = _tmp_sm()
+    client, _, _ = _make_client(sm=sm)
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        wav_path = _make_tiny_wav(Path(f.name))
+
+    sm.set_voice("Sunny", str(wav_path), "ref text")
+    r = client.get("/api/voices/Sunny/audio")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("audio/wav")
+    assert len(r.content) > 0
+    print("  PASS test_voice_audio_serves_clip")
+
+
+def test_voice_audio_not_found():
+    client, _, _ = _make_client()
+    r = client.get("/api/voices/UnknownSpeaker/audio")
+    assert r.status_code == 404
+    print("  PASS test_voice_audio_not_found")
+
+
+def test_voice_audio_missing_file():
+    sm = _tmp_sm()
+    client, _, _ = _make_client(sm=sm)
+
+    # Register a voice whose clip has since vanished from disk. set_voice does
+    # not validate existence, so this models a stale DB row.
+    sm.set_voice("Ghost", r"C:\does\not\exist\ghost.wav", "")
+    r = client.get("/api/voices/Ghost/audio")
+    assert r.status_code == 404
+    print("  PASS test_voice_audio_missing_file")
+
+
 def test_pipeline_status_idle():
     mgr = PipelineManager()
     client, _, _ = _make_client(mgr=mgr)
@@ -368,6 +402,9 @@ TESTS = [
     test_upload_voice,
     test_delete_voice,
     test_delete_voice_not_found,
+    test_voice_audio_serves_clip,
+    test_voice_audio_not_found,
+    test_voice_audio_missing_file,
     test_pipeline_status_idle,
     test_pipeline_start_project_not_found,
     test_pipeline_start_already_running,

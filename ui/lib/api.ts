@@ -129,6 +129,10 @@ export function audioUrl(chapterId: number): string {
   return `${BASE}/audio/${chapterId}`
 }
 
+export function voiceAudioUrl(speaker: string): string {
+  return `${BASE}/voices/${encodeURIComponent(speaker)}/audio`
+}
+
 export async function deleteChapterAudio(
   chapterId: number,
 ): Promise<{ deleted: number; file: string | null }> {

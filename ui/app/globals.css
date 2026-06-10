@@ -254,6 +254,73 @@
 .log-scanlines > * { position: relative; z-index: 2; }
 
 /* ─────────────────────────────────────────────────────────────────────────────
+   DREAM REALM — atmospheric backdrop
+   Faint vignette + cold moonlit gradient at the top edge. Pure CSS, zero
+   layout cost; sits behind everything via a fixed pseudo-element.
+───────────────────────────────────────────────────────────────────────────── */
+
+.dream-realm { position: relative; }
+.dream-realm::before {
+  content: '';
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(120% 60% at 50% -10%, rgba(212,212,216,0.045) 0%, transparent 55%),
+    radial-gradient(80% 90% at 50% 115%, rgba(0,0,0,0.85) 0%, transparent 60%),
+    radial-gradient(140% 140% at 50% 50%, transparent 55%, rgba(0,0,0,0.5) 100%);
+}
+.dream-realm > * { position: relative; z-index: 1; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   SPELL TOASTS — Nightmare Spell notifications: [ bracketed system messages ]
+───────────────────────────────────────────────────────────────────────────── */
+
+.spell-toast {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 14px;
+  max-width: 360px;
+  background: rgba(0,0,0,0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid #27272A;
+  border-left-width: 2px;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+}
+.spell-toast--gold    { border-left-color: #FBBF24; color: #FBBF24; }
+.spell-toast--crimson { border-left-color: #991B1B; color: #B91C1C; }
+.spell-toast--chrome  { border-left-color: #D4D4D8; color: #D4D4D8; }
+.spell-toast .spell-bracket { opacity: 0.45; user-select: none; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   PLAYER / GRID HELPERS
+───────────────────────────────────────────────────────────────────────────── */
+
+/* Off-screen chapter cards skip layout+paint until scrolled near. */
+.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 190px;
+}
+
+/* Minimap click → grid scroll lands here with a brief gold pulse. */
+.flash-highlight { animation: flash-highlight 1.6s ease-out 1; }
+
+/* Three tiny bars on the card whose audio is playing in the global player. */
+.equalizer { display: inline-flex; align-items: flex-end; gap: 2px; height: 10px; }
+.equalizer span {
+  width: 2px; height: 100%;
+  background: #D4D4D8;
+  transform-origin: bottom;
+  animation: equalize 0.9s ease-in-out infinite;
+}
+.equalizer span:nth-child(2) { animation-delay: 0.25s; }
+.equalizer span:nth-child(3) { animation-delay: 0.5s;  }
+.equalizer--paused span { animation-play-state: paused; opacity: 0.4; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
    MISC
 ───────────────────────────────────────────────────────────────────────────── */
 

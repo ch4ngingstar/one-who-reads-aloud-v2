@@ -12,6 +12,7 @@ const config: Config = {
         sans: ['var(--font-sans)', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
         mono: ['var(--font-mono)', 'ui-monospace', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
         tech: ['var(--font-tech)', 'VT323', 'Courier New', 'monospace'],
+        display: ['var(--font-display)', 'Cinzel', 'Georgia', 'serif'],
       },
       colors: {
         // ── Monochromatic canvas ────────────────────────────────────────────────
@@ -98,6 +99,19 @@ const config: Config = {
           '0%, 100%': { opacity: '0.4' },
           '50%':      { opacity: '0.7' },
         },
+        'flash-highlight': {
+          '0%':   { boxShadow: '0 0 0 1px rgba(251,191,36,0.7), 0 0 28px -6px rgba(251,191,36,0.45)' },
+          '70%':  { boxShadow: '0 0 0 1px rgba(251,191,36,0.35), 0 0 18px -8px rgba(251,191,36,0.2)' },
+          '100%': { boxShadow: '0 0 0 0 transparent' },
+        },
+        'toast-in': {
+          from: { opacity: '0', transform: 'translateX(16px)' },
+          to:   { opacity: '1', transform: 'translateX(0)' },
+        },
+        'equalize': {
+          '0%, 100%': { transform: 'scaleY(0.3)' },
+          '50%':      { transform: 'scaleY(1)' },
+        },
       },
       animation: {
         'pulse-slow':   'pulse 3s cubic-bezier(0.4,0,0.6,1) infinite',
@@ -111,6 +125,9 @@ const config: Config = {
         'drift':        'drift 5s ease-in-out infinite',
         'flicker':      'flicker 8s ease-in-out infinite',
         'thread-pulse': 'thread-pulse 4s ease-in-out infinite',
+        'flash-highlight': 'flash-highlight 1.6s ease-out 1',
+        'toast-in':        'toast-in 0.22s ease-out',
+        'equalize':        'equalize 0.9s ease-in-out infinite',
       },
     },
   },
