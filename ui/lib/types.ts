@@ -36,6 +36,14 @@ export interface Chapter {
   updated_at: string
 }
 
+/** Extra generation options chosen in the Setup panel, forwarded to startPipeline. */
+export interface GenOptions {
+  /** 0-based [start, end] chapter_index range, inclusive — or null for the whole book. */
+  chapterRange: [number, number] | null
+  outputFormat: string
+  vramCheck: boolean
+}
+
 export interface Voice {
   id: number
   speaker: string

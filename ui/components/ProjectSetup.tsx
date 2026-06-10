@@ -1,12 +1,17 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { createProject } from '@/lib/api'
-import type { Project, Progress } from '@/lib/types'
+import type { Project, Progress, GenOptions } from '@/lib/types'
+
+const OUTPUT_FORMATS = ['mp3', 'wav', 'flac', 'ogg'] as const
 
 interface Props {
   initialEpub: string; initialLlm: string
   initialTtsDir: string; initialSpeakers: string
-  onCreated: (project: Project, progress: Progress, llmPath: string, ttsDir: string, speakers: string[]) => void
+  onCreated: (
+    project: Project, progress: Progress,
+    llmPath: string, ttsDir: string, speakers: string[], options: GenOptions,
+  ) => void
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -26,6 +31,10 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
   const [llmPath,  setLlmPath]  = useState(initialLlm)
   const [ttsDir,   setTtsDir]   = useState(initialTtsDir)
   const [speakers, setSpeakers] = useState(initialSpeakers)
+  const [rangeStart, setRangeStart] = useState('')   // 1-based, matches the chapter grid; empty = whole book
+  const [rangeEnd,   setRangeEnd]   = useState('')
+  const [outputFormat, setOutputFormat] = useState<string>('mp3')
+  const [vramCheck,    setVramCheck]    = useState(true)
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState<string | null>(null)
 
@@ -34,15 +43,30 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
   useEffect(() => { setTtsDir(initialTtsDir) },     [initialTtsDir])
   useEffect(() => { setSpeakers(initialSpeakers) }, [initialSpeakers])
 
+  /** Build the 0-based [start, end] chapter_index range from the 1-based form inputs. */
+  function resolveChapterRange(): [number, number] | null {
+    const s = rangeStart.trim(), e = rangeEnd.trim()
+    if (!s && !e) return null   // whole book
+    const start = s ? parseInt(s, 10) : 1
+    const end   = e ? parseInt(e, 10) : start
+    if (!Number.isFinite(start) || !Number.isFinite(end)) throw new Error('Chapter range must be whole numbers')
+    if (start < 1 || end < 1) throw new Error('Chapter numbers start at 1')
+    if (start > end) throw new Error('Chapter range: "From" must be ≤ "To"')
+    return [start - 1, end - 1]   // → 0-based chapter_index, inclusive
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault(); setError(null); setLoading(true)
     try {
       const speakerList = speakers.split(',').map(s => s.trim()).filter(Boolean)
+      const chapterRange = resolveChapterRange()   // throws on invalid input → caught below
       const result = await createProject({
         epub_path: epubPath.trim(), llm_model_path: llmPath.trim(),
         tts_model_dir: ttsDir.trim(), speakers: speakerList,
       })
-      onCreated(result.project, result.progress, llmPath.trim(), ttsDir.trim(), speakerList)
+      onCreated(result.project, result.progress, llmPath.trim(), ttsDir.trim(), speakerList, {
+        chapterRange, outputFormat, vramCheck,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally { setLoading(false) }
@@ -116,6 +140,63 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
           </div>
         )}
       </Field>
+
+      <div className="divider" />
+
+      {/* Generation options */}
+      <div className="flex items-center gap-3">
+        <span className="label">Generation</span>
+        <div className="flex-1 weaver-thread" />
+      </div>
+
+      {/* Chapter range — 1-based, matches the chapter grid; blank = whole book */}
+      <Field label="Chapter Range" hint="optional · whole book if blank">
+        <div className="flex items-center gap-2">
+          <input
+            className="input"
+            type="number"
+            min={1}
+            placeholder="From"
+            value={rangeStart}
+            onChange={e => setRangeStart(e.target.value)}
+            spellCheck={false}
+          />
+          <span className="text-ink-ghost text-[11px] select-none">→</span>
+          <input
+            className="input"
+            type="number"
+            min={1}
+            placeholder="To"
+            value={rangeEnd}
+            onChange={e => setRangeEnd(e.target.value)}
+            spellCheck={false}
+          />
+        </div>
+      </Field>
+
+      {/* Output format */}
+      <Field label="Output Format" hint="assembled audio">
+        <select
+          className="input"
+          value={outputFormat}
+          onChange={e => setOutputFormat(e.target.value)}
+        >
+          {OUTPUT_FORMATS.map(f => (
+            <option key={f} value={f}>{f.toUpperCase()}</option>
+          ))}
+        </select>
+      </Field>
+
+      {/* VRAM barrier toggle */}
+      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={vramCheck}
+          onChange={e => setVramCheck(e.target.checked)}
+          className="w-3.5 h-3.5 accent-[#FBBF24] cursor-pointer"
+        />
+        <span className="text-[11px] text-ink-secondary">VRAM barrier between LLM &amp; TTS</span>
+      </label>
 
       {/* Error */}
       {error && (

@@ -107,11 +107,30 @@ function formatDuration(s: number) {
   return `${sec}s`
 }
 
-type Filter = 'all' | ChapterStatus
+type Filter = 'all' | 'pending' | 'diarized' | 'tts_done' | 'complete' | 'error'
+type Stage  = 'diarize' | 'synthesize' | 'assemble'
+
+// "assembled" is a transient sub-state between TTS and complete — group it
+// with tts_done everywhere in the filter UI so no chapter is unreachable.
+const FILTER_STATUSES: Record<Exclude<Filter, 'all'>, ChapterStatus[]> = {
+  pending:  ['pending'],
+  diarized: ['diarized'],
+  tts_done: ['tts_done', 'assembled'],
+  complete: ['complete'],
+  error:    ['error'],
+}
+
+const STAGE_LABEL: Record<Stage, string> = {
+  diarize:    'Diarizing',
+  synthesize: 'Synthesizing',
+  assemble:   'Assembling',
+}
+
 interface TtsProg { done: number; total: number }
 interface Props {
   chapters: Chapter[]
   activeChapterId?: number | null
+  activeStage?:     Stage | null
   ttsProgress?:    Record<number, TtsProg>
   onDelete?:       (chapterId: number) => void
   onRedo?:         (chapterId: number) => void
@@ -135,9 +154,9 @@ function TtsBar({ done, total }: TtsProg) {
 
 // ── Chapter card ──────────────────────────────────────────────────────────────
 function ChapterCard({
-  chapter, isActive, ttsProg, onDelete, onRedo,
+  chapter, isActive, activeStage, ttsProg, onDelete, onRedo,
 }: {
-  chapter: Chapter; isActive: boolean; ttsProg?: TtsProg
+  chapter: Chapter; isActive: boolean; activeStage?: Stage | null; ttsProg?: TtsProg
   onDelete?: () => void; onRedo?: () => void
 }) {
   const [showPlayer, setShowPlayer] = useState(false)
@@ -192,7 +211,9 @@ function ChapterCard({
           <span className={`text-[10px] font-medium uppercase tracking-wide ${
             isActive ? 'text-[#A0A0A8]' : STATUS_TEXT[chapter.status]
           }`}>
-            {isActive ? 'Processing' : STATUS_LABEL[chapter.status]}
+            {isActive
+              ? (activeStage ? STAGE_LABEL[activeStage] : 'Processing')
+              : STATUS_LABEL[chapter.status]}
           </span>
         </div>
       </div>
@@ -301,24 +322,37 @@ function ChapterCard({
   )
 }
 
-// ── Grid with filter bar ──────────────────────────────────────────────────────
-export default function ChapterGrid({ chapters, activeChapterId, ttsProgress = {}, onDelete, onRedo }: Props) {
+// ── Grid with filter bar + search ─────────────────────────────────────────────
+export default function ChapterGrid({
+  chapters, activeChapterId, activeStage, ttsProgress = {}, onDelete, onRedo,
+}: Props) {
   const [filter, setFilter] = useState<Filter>('all')
+  const [query,  setQuery]  = useState('')
 
   const counts = chapters.reduce<Partial<Record<ChapterStatus, number>>>(
-    (acc, ch) => ({ ...acc, [ch.status]: (acc[ch.status] ?? 0) + 1 }),
+    (acc, ch) => { acc[ch.status] = (acc[ch.status] ?? 0) + 1; return acc },
     {},
   )
+  const countFor = (key: Exclude<Filter, 'all'>) =>
+    FILTER_STATUSES[key].reduce((sum, s) => sum + (counts[s] ?? 0), 0)
 
-  const displayed = filter === 'all' ? chapters : chapters.filter(ch => ch.status === filter)
+  const q = query.trim().toLowerCase()
+  const displayed = chapters.filter(ch => {
+    if (filter !== 'all' && !FILTER_STATUSES[filter].includes(ch.status)) return false
+    if (!q) return true
+    // Match against the title or the 1-based chapter number.
+    return ch.title.toLowerCase().includes(q)
+        || String(ch.chapter_index + 1) === q
+        || String(ch.chapter_index + 1).padStart(3, '0').includes(q)
+  })
 
   const filters: { key: Filter; label: string }[] = [
-    { key: 'all',      label: `All ${chapters.length}`           },
-    { key: 'pending',  label: `Pending ${counts.pending  ?? 0}`  },
-    { key: 'diarized', label: `Diarized ${counts.diarized ?? 0}` },
-    { key: 'tts_done', label: `TTS ${counts.tts_done     ?? 0}`  },
-    { key: 'complete', label: `Done ${counts.complete    ?? 0}`  },
-    { key: 'error',    label: `Error ${counts.error      ?? 0}`  },
+    { key: 'all',      label: `All ${chapters.length}`            },
+    { key: 'pending',  label: `Pending ${countFor('pending')}`    },
+    { key: 'diarized', label: `Diarized ${countFor('diarized')}`  },
+    { key: 'tts_done', label: `TTS ${countFor('tts_done')}`       },
+    { key: 'complete', label: `Done ${countFor('complete')}`      },
+    { key: 'error',    label: `Error ${countFor('error')}`        },
   ]
 
   return (
@@ -341,11 +375,30 @@ export default function ChapterGrid({ chapters, activeChapterId, ttsProgress = {
             </button>
           )
         })}
+
+        {/* Search — by title or chapter number */}
+        <div className="relative ml-auto">
+          <input
+            className="input !w-44 !py-1.5 pr-7 text-[11px]"
+            placeholder="Search chapters…"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            spellCheck={false}
+            aria-label="Search chapters by title or number"
+          />
+          {query && (
+            <button
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-ink-ghost hover:text-ink-secondary text-[10px] transition-colors"
+              onClick={() => setQuery('')}
+              aria-label="Clear search"
+            >✕</button>
+          )}
+        </div>
       </div>
 
       {displayed.length === 0 ? (
         <div className="text-ink-ghost text-xs text-center py-12">
-          No chapters match this filter.
+          {q ? `No chapters match “${query.trim()}”.` : 'No chapters match this filter.'}
         </div>
       ) : (
         <div
@@ -357,6 +410,7 @@ export default function ChapterGrid({ chapters, activeChapterId, ttsProgress = {
               key={ch.id}
               chapter={ch}
               isActive={ch.id === activeChapterId}
+              activeStage={activeStage}
               ttsProg={ttsProgress[ch.id]}
               onDelete={() => onDelete?.(ch.id)}
               onRedo={() => onRedo?.(ch.id)}

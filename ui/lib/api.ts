@@ -31,6 +31,12 @@ export async function getProject(
   return req(`/project/${encodeURIComponent(name)}`)
 }
 
+export async function listProjects(): Promise<{
+  projects: (Project & { progress: Progress })[]
+}> {
+  return req('/projects')
+}
+
 // ── Chapters ──────────────────────────────────────────────────────────────────
 
 export async function getChapters(
@@ -48,6 +54,7 @@ export async function startPipeline(params: {
   speakers?: string[]
   chapter_range?: [number, number] | null
   output_format?: string
+  vram_check_enabled?: boolean
 }): Promise<{ status: string }> {
   return req('/pipeline/start', { method: 'POST', body: JSON.stringify(params) })
 }

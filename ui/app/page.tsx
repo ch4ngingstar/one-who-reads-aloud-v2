@@ -1,7 +1,7 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
-  getProject, getChapters, getVoices,
+  getProject, getChapters, getVoices, listProjects,
   startPipeline, pausePipeline, resumePipeline, stopPipeline, getPipelineStatus,
 } from '@/lib/api'
 import { useSSE }        from '@/hooks/useSSE'
@@ -10,15 +10,17 @@ import VoiceMapper       from '@/components/VoiceMapper'
 import ChapterGrid       from '@/components/ChapterGrid'
 import LiveLog           from '@/components/LiveLog'
 import type {
-  Project, Progress, Chapter, Voice, SSEEvent, PipelineStatusResponse, ChapterStatus,
+  Project, Progress, Chapter, Voice, SSEEvent, PipelineStatusResponse, ChapterStatus, GenOptions,
 } from '@/lib/types'
 
 const STORAGE_KEY = 'pipeline_cfg'
 type  PipeStatus  = PipelineStatusResponse['status']
+type  Stage       = 'diarize' | 'synthesize' | 'assemble'
 
 interface SavedConfig {
   projectName: string; llmPath: string
   ttsDir: string; epubPath: string; speakers: string
+  outputFormat?: string; vramCheck?: boolean
   fishDir?: string  // legacy key — migrated to ttsDir on load
 }
 
@@ -96,6 +98,22 @@ function ChapterStrip({ chapters, activeId }: { chapters: Chapter[]; activeId: n
   )
 }
 
+// ── ETA helper ────────────────────────────────────────────────────────────────
+function formatEta(seconds: number): string {
+  if (!isFinite(seconds) || seconds <= 0) return ''
+  const h = Math.floor(seconds / 3600)
+  const m = Math.round((seconds % 3600) / 60)
+  if (h > 0) return `~${h}h ${m}m left`
+  if (m > 0) return `~${m}m left`
+  return '~1m left'
+}
+
+const STAGE_LABEL: Record<Stage, string> = {
+  diarize:    'Diarizing',
+  synthesize: 'Synthesizing',
+  assemble:   'Assembling',
+}
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const [project,    setProject]    = useState<Project | null>(null)
@@ -105,14 +123,19 @@ export default function Dashboard() {
   const [pipeStatus, setPipeStatus] = useState<PipeStatus>('idle')
   const [events,     setEvents]     = useState<SSEEvent[]>([])
   const [activeChId,  setActiveChId]  = useState<number | null>(null)
+  const [activeStage, setActiveStage] = useState<Stage | null>(null)
   const [ttsProgress, setTtsProgress] = useState<Record<number, { done: number; total: number }>>({})
   const [logOpen,     setLogOpen]     = useState(false)
+  const logUserClosed = useRef(false)
   const [sideTab,   setSideTab]   = useState<'setup' | 'voices'>('setup')
   const [startError,setStartError] = useState<string | null>(null)
   const [llmPath,   setLlmPath]   = useState('C:/Users/alityan/OneDrive/Desktop/shaodw salve/models/qwen2.5-14b-instruct-q4_k_m-00001-of-00003.gguf')
-  const [ttsDir,    setTtsDir]    = useState('')
+  const [ttsDir,    setTtsDir]    = useState('C:/Users/alityan/OneDrive/Desktop/shaodw salve/index-tts/checkpoints')
+  const [projects,  setProjects]  = useState<(Project & { progress: Progress })[]>([])
   const [epubPath,  setEpubPath]  = useState('')
   const [speakers,  setSpeakers]  = useState('Sunny, Nephis, Cassie, Effie, Kai')
+  const [outputFormat, setOutputFormat] = useState('mp3')
+  const [vramCheck,    setVramCheck]    = useState(true)
   const [startedAt, setStartedAt] = useState<number | null>(null)
 
   const fetchChapters = useCallback(async (p: Project) => {
@@ -132,20 +155,45 @@ export default function Dashboard() {
     try { const { voices: vs } = await getVoices(); setVoices(vs) } catch { /* silent */ }
   }, [])
 
+  const saveCfg = useCallback((patch: Partial<SavedConfig>) => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY)
+      const cfg = raw ? JSON.parse(raw) : {}
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...cfg, ...patch }))
+    } catch { /* quota/parse — non-fatal */ }
+  }, [])
+
+  const selectProject = useCallback(async (name: string) => {
+    if (!name) return
+    try {
+      const { project: p, progress: pr } = await getProject(name)
+      setProject(p); setProgress(pr); setSideTab('voices'); fetchChapters(p)
+      getPipelineStatus().then(s => setPipeStatus(s.status)).catch(() => {})
+      saveCfg({ projectName: name })
+    } catch { /* */ }
+  }, [fetchChapters, saveCfg])
+
   useEffect(() => {
     refreshVoices()
+    listProjects().then(({ projects: ps }) => setProjects(ps)).catch(() => {})
+    // Always sync with the backend — the pipeline may still be running from a
+    // previous browser session.
+    getPipelineStatus().then(s => setPipeStatus(s.status)).catch(() => {})
     let cfg: Partial<SavedConfig> = {}
     try { const r = localStorage.getItem(STORAGE_KEY); if (r) cfg = JSON.parse(r) } catch { /* */ }
     if (cfg.llmPath && !cfg.llmPath.includes('7b'))  setLlmPath(cfg.llmPath)
-    const savedTtsDir = cfg.ttsDir || cfg.fishDir   // migrate legacy fishDir
-    if (savedTtsDir) setTtsDir(savedTtsDir)
+    // Migrate legacy fishDir, but ignore stale Fish Speech paths — TTS is now
+    // IndexTTS2 (index-tts/checkpoints). A saved fish-speech dir would fail.
+    const savedTtsDir = cfg.ttsDir || cfg.fishDir
+    if (savedTtsDir && !/fish[-_ ]?speech/i.test(savedTtsDir)) setTtsDir(savedTtsDir)
     if (cfg.epubPath) setEpubPath(cfg.epubPath)
     if (cfg.speakers) setSpeakers(cfg.speakers)
+    if (cfg.outputFormat) setOutputFormat(cfg.outputFormat)
+    if (cfg.vramCheck != null) setVramCheck(cfg.vramCheck)
     if (cfg.projectName) {
       getProject(cfg.projectName)
         .then(({ project: p, progress: pr }) => {
           setProject(p); setProgress(pr); setSideTab('voices'); fetchChapters(p)
-          getPipelineStatus().then(s => setPipeStatus(s.status)).catch(() => {})
         })
         .catch(() => {})
     }
@@ -154,51 +202,84 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (pipeStatus !== 'running') return
-    const id = setInterval(() => { refreshChapters(); refreshProgress() }, 3000)
+    const id = setInterval(() => {
+      refreshChapters(); refreshProgress()
+      // Catch missed SSE terminal events (e.g. laptop slept through them).
+      getPipelineStatus().then(s => {
+        if (s.status !== 'running') setPipeStatus(s.status)
+      }).catch(() => {})
+    }, 3000)
     return () => clearInterval(id)
   }, [pipeStatus, refreshChapters, refreshProgress])
 
   const handleSSE = useCallback((e: SSEEvent) => {
     setEvents(prev => [...prev.slice(-499), e])
-    if (!logOpen && e.type !== 'pipeline_done' && e.type !== 'pipeline_stopped') setLogOpen(true)
-    if (e.type === 'pipeline_start')   { setStartedAt(Date.now()); setTtsProgress({}) }
-    if (e.type === 'chapter_start')    setActiveChId(e.chapter_id ?? null)
+    if (e.type === 'pipeline_start') {
+      logUserClosed.current = false
+      setLogOpen(true)
+      setStartedAt(Date.now()); setTtsProgress({})
+    }
+    // Respect an explicit close — don't force the log back open on every event.
+    if (!logOpen && !logUserClosed.current
+        && e.type !== 'pipeline_done' && e.type !== 'pipeline_stopped') setLogOpen(true)
+    if (e.type === 'chapter_start')    { setActiveChId(e.chapter_id ?? null); setActiveStage(null) }
+    if (e.type === 'stage_start' && typeof e.stage === 'string') {
+      setActiveStage(e.stage as Stage)
+    }
     if (e.type === 'tts_progress' && e.chapter_id != null) {
       setActiveChId(e.chapter_id)
       setTtsProgress(prev => ({
         ...prev, [e.chapter_id as number]: { done: e.lines_done ?? 0, total: e.lines_total ?? 0 },
       }))
     }
-    if (e.type === 'chapter_done')     { setActiveChId(null); refreshChapters(); refreshProgress() }
-    if (e.type === 'chapter_error')    { setActiveChId(null); refreshChapters() }
-    if (e.type === 'pipeline_done')    { setPipeStatus('complete'); setActiveChId(null); refreshChapters(); refreshProgress() }
-    if (e.type === 'pipeline_stopped') { setPipeStatus('stopped');  setActiveChId(null); refreshChapters(); refreshProgress() }
+    if (e.type === 'chapter_done')     { setActiveChId(null); setActiveStage(null); refreshChapters(); refreshProgress() }
+    if (e.type === 'chapter_error')    { setActiveChId(null); setActiveStage(null); refreshChapters() }
+    if (e.type === 'pipeline_done')    { setPipeStatus('complete'); setActiveChId(null); setActiveStage(null); refreshChapters(); refreshProgress() }
+    if (e.type === 'pipeline_stopped') { setPipeStatus('stopped');  setActiveChId(null); setActiveStage(null); refreshChapters(); refreshProgress() }
     if (e.type === 'pipeline_error')   setPipeStatus('error')
   }, [logOpen, refreshChapters, refreshProgress])
 
   useSSE(pipeStatus === 'running' || pipeStatus === 'paused', handleSSE)
 
+  function buildStartParams() {
+    const speakerList = speakers.split(',').map(s => s.trim()).filter(Boolean)
+    return {
+      llm_model_path: llmPath, tts_model_dir: ttsDir,
+      speakers: speakerList, output_format: outputFormat,
+      vram_check_enabled: vramCheck,
+    }
+  }
+
   async function handleStart() {
     if (!project) return; setStartError(null)
     try {
-      await startPipeline({ project_name: project.name, llm_model_path: llmPath, tts_model_dir: ttsDir })
-      setPipeStatus('running'); setLogOpen(true)
+      await startPipeline({ project_name: project.name, ...buildStartParams() })
+      setPipeStatus('running'); logUserClosed.current = false; setLogOpen(true)
     } catch (err) { setStartError(err instanceof Error ? err.message : 'Failed to start') }
   }
 
-  async function handlePause()  { await pausePipeline();  setPipeStatus('paused')  }
-  async function handleResume() { await resumePipeline(); setPipeStatus('running') }
-  async function handleStop()   { await stopPipeline();   setPipeStatus('stopped') }
+  async function handlePause()  { try { await pausePipeline();  setPipeStatus('paused')  } catch { /* */ } }
+  async function handleResume() { try { await resumePipeline(); setPipeStatus('running') } catch { /* */ } }
+  async function handleStop()   { try { await stopPipeline();   setPipeStatus('stopped') } catch { /* */ } }
 
-  function handleProjectCreated(p: Project, prog: Progress, llm: string, tts: string, spkList: string[]) {
+  function handleProjectCreated(
+    p: Project, prog: Progress, llm: string, tts: string, spkList: string[], opts: GenOptions,
+  ) {
     setProject(p); setProgress(prog); setLlmPath(llm); setTtsDir(tts)
-    setSpeakers(spkList.join(', ')); setSideTab('voices')
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      projectName: p.name, llmPath: llm, ttsDir: tts, epubPath, speakers: spkList.join(', '),
-    } satisfies SavedConfig))
+    setSpeakers(spkList.join(', ')); setOutputFormat(opts.outputFormat)
+    setVramCheck(opts.vramCheck); setSideTab('voices')
+    saveCfg({
+      projectName: p.name, llmPath: llm, ttsDir: tts, epubPath,
+      speakers: spkList.join(', '),
+      outputFormat: opts.outputFormat, vramCheck: opts.vramCheck,
+    })
     fetchChapters(p)
-    startPipeline({ project_name: p.name, llm_model_path: llm, tts_model_dir: tts, speakers: spkList })
-      .then(() => { setPipeStatus('running'); setLogOpen(true) })
+    startPipeline({
+      project_name: p.name, llm_model_path: llm, tts_model_dir: tts, speakers: spkList,
+      chapter_range: opts.chapterRange, output_format: opts.outputFormat,
+      vram_check_enabled: opts.vramCheck,
+    })
+      .then(() => { setPipeStatus('running'); logUserClosed.current = false; setLogOpen(true) })
       .catch(err => {
         const msg = err instanceof Error ? err.message : 'Failed to start'
         if (msg.toLowerCase().includes('already running')) setPipeStatus('running')
@@ -209,6 +290,18 @@ export default function Dashboard() {
   const throughput = startedAt && progress && progress.complete > 0
     ? (progress.complete / ((Date.now() - startedAt) / 3_600_000)).toFixed(1)
     : null
+
+  // ETA from measured per-chapter processing time × chapters left.
+  const eta = useMemo(() => {
+    if (!progress || pipeStatus !== 'running') return ''
+    const timed = chapters.filter(c => c.processing_seconds != null && c.status === 'complete')
+    if (!timed.length) return ''
+    const avg = timed.reduce((s, c) => s + (c.processing_seconds ?? 0), 0) / timed.length
+    const remaining = progress.total - progress.complete - progress.error
+    return formatEta(avg * remaining)
+  }, [chapters, progress, pipeStatus])
+
+  const activeChapter = activeChId != null ? chapters.find(c => c.id === activeChId) : undefined
 
   const canStart  = project && llmPath && ttsDir && ['idle','stopped','complete','error'].includes(pipeStatus)
   const isRunning = pipeStatus === 'running'
@@ -343,11 +436,36 @@ export default function Dashboard() {
 
           <div className="flex-1 overflow-y-auto p-5">
             {sideTab === 'setup' ? (
-              <ProjectSetup
-                initialEpub={epubPath} initialLlm={llmPath}
-                initialTtsDir={ttsDir} initialSpeakers={speakers}
-                onCreated={handleProjectCreated}
-              />
+              <div className="space-y-5">
+                {projects.length > 0 && (
+                  <div>
+                    <label className="block text-[11px] font-medium uppercase tracking-[0.1em] text-ink-ghost mb-1.5">
+                      Open existing project
+                    </label>
+                    <select
+                      value={project?.name ?? ''}
+                      onChange={(e) => selectProject(e.target.value)}
+                      className="w-full bg-black/30 border border-white/10 rounded-md px-3 py-2
+                                 text-sm text-ink-secondary focus:border-white/25 focus:outline-none"
+                    >
+                      <option value="" disabled>Select a project…</option>
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.name}>
+                          {p.name} — {p.progress.complete}/{p.progress.total} done
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1.5 text-[11px] text-ink-ghost">
+                      Or create a new one from an EPUB below.
+                    </p>
+                  </div>
+                )}
+                <ProjectSetup
+                  initialEpub={epubPath} initialLlm={llmPath}
+                  initialTtsDir={ttsDir} initialSpeakers={speakers}
+                  onCreated={handleProjectCreated}
+                />
+              </div>
             ) : (
               <VoiceMapper voices={voices} onUpdate={refreshVoices} />
             )}
@@ -367,7 +485,7 @@ export default function Dashboard() {
                 {[
                   { label: 'Total',   value: progress.total,                       color: 'text-ink-secondary' },
                   { label: 'Pending', value: progress.pending,                      color: 'text-[#52525B]'     },
-                  { label: 'Active',  value: progress.diarized + progress.tts_done, color: 'text-[#A0A0A8]'     },
+                  { label: 'Active',  value: progress.diarized + progress.tts_done + progress.assembled, color: 'text-[#A0A0A8]' },
                   { label: 'Done',    value: progress.complete,                     color: 'text-[#D4D4D8]'     },
                   { label: 'Error',   value: progress.error,                        color: 'text-[#991B1B]'     },
                 ].map(({ label, value, color }) => (
@@ -378,6 +496,9 @@ export default function Dashboard() {
                 ))}
 
                 <div className="ml-auto flex items-center gap-4">
+                  {eta && (
+                    <span className="tech text-sm text-ink-ghost tabular-nums tracking-wide">{eta}</span>
+                  )}
                   {throughput && (
                     <span className="tech text-sm text-ink-muted tabular-nums tracking-wide">
                       {throughput}
@@ -389,6 +510,19 @@ export default function Dashboard() {
                   </span>
                 </div>
               </div>
+
+              {/* Live "now playing" line */}
+              {isRunning && activeChapter && (
+                <div className="flex items-center gap-2 mt-2 text-[10px] font-mono text-ink-muted animate-fade-in">
+                  <span className="status-dot bg-dot-running animate-pulse-slow flex-shrink-0" />
+                  <span className="text-ink-ghost uppercase tracking-[0.14em] text-[9px]">
+                    {activeStage ? STAGE_LABEL[activeStage] : 'Processing'}
+                  </span>
+                  <span className="truncate max-w-[400px] text-ink-secondary">
+                    {String(activeChapter.chapter_index + 1).padStart(3, '0')} · {activeChapter.title}
+                  </span>
+                </div>
+              )}
 
               <div className="weaver-thread animate-thread-pulse mt-3 mb-1" />
               <ChapterStrip chapters={chapters} activeId={activeChId} />
@@ -440,6 +574,7 @@ export default function Dashboard() {
               <ChapterGrid
                 chapters={chapters}
                 activeChapterId={activeChId}
+                activeStage={activeStage}
                 ttsProgress={ttsProgress}
                 onDelete={refreshChapters}
                 onRedo={refreshChapters}
@@ -450,7 +585,11 @@ export default function Dashboard() {
       </div>
 
       {/* ══════════════════════════════════════════════════════ LIVE LOG ═══ */}
-      <LiveLog events={events} open={logOpen} onToggle={() => setLogOpen(v => !v)} />
+      <LiveLog
+        events={events}
+        open={logOpen}
+        onToggle={() => setLogOpen(v => { if (v) logUserClosed.current = true; return !v })}
+      />
     </div>
   )
 }

@@ -131,6 +131,7 @@ export default function VoiceMapper({ voices, onUpdate }: { voices: Voice[]; onU
   }
 
   async function handleDelete(speaker: string) {
+    if (!confirm(`Remove the voice mapping for ${speaker}? (The audio file stays on disk.)`)) return
     setError(null)
     try { await deleteVoice(speaker); onUpdate() }
     catch (err) { setError(err instanceof Error ? err.message : 'Delete failed') }

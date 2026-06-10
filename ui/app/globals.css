@@ -30,6 +30,12 @@
 
   ::selection { background: rgba(212,212,216,0.12); color: #F4F4F5; }
 
+  /* Keyboard navigation — visible focus ring without disturbing mouse flow */
+  :focus-visible {
+    outline: 1px solid rgba(212,212,216,0.45);
+    outline-offset: 2px;
+  }
+
   input:not([type='range']), textarea, select {
     background: #121212;
     color: #F4F4F5;
