@@ -55,7 +55,7 @@ def _make_director(sm, mock_fn):
     director.cfg            = {
         "n_ctx": 4096, "n_batch": 512, "n_gpu_layers": -1,
         "verbose": False, "temperature": 0.1, "max_tokens": 4096,
-        "retry_temp": 0.4, "max_retries": 3,
+        "retry_temp": 0.4, "max_retries": 3, "min_word_coverage": 0.96,
     }
     from llm_director import _build_system_prompt
     director._system_prompt = _build_system_prompt(DEFAULT_SPEAKERS)
@@ -233,6 +233,43 @@ def test_fallback_on_total_failure():
     print("  PASS test_fallback_on_total_failure")
 
 
+def test_word_loss_triggers_fallback():
+    """LLM silently dropping sentences must be caught and fall back to verbatim text."""
+    sm = _tmp_sm()
+    original_text = ("The ancient warrior raised his enormous crimson blade and "
+                     "charged across the shattered battlefield toward the abomination.")
+    _, ch_id = _seed_chapter(sm, [original_text])
+
+    # Mock returns a drastically truncated line (most content words dropped).
+    lossy = json.dumps({"lines": [
+        {"line_index": 0, "speaker": "Narrator", "text": "The blade.", "emotion": "neutral"},
+    ]})
+    director = _make_director(sm, mock_fn=lambda text, temperature=0.1: lossy)
+    n_lines = director.process_chapter(ch_id)
+
+    assert n_lines == 1, "Should fall back to a single Narrator line"
+    lines = sm.get_lines_for_chapter(ch_id)
+    assert lines[0]["speaker"] == "Narrator"
+    assert lines[0]["text"] == original_text, "Fallback must preserve ALL original text"
+    print("  PASS test_word_loss_triggers_fallback")
+
+
+def test_full_coverage_accepts_result():
+    """A faithful diarization (all content words present) must be accepted as-is."""
+    sm = _tmp_sm()
+    text = "Nephis drew her radiant sword and faced the encroaching darkness calmly."
+    _, ch_id = _seed_chapter(sm, [text])
+    good = json.dumps({"lines": [
+        {"line_index": 0, "speaker": "Narrator",
+         "text": "Nephis drew her radiant sword and faced the encroaching darkness", "emotion": "neutral"},
+        {"line_index": 1, "speaker": "Narrator", "text": "calmly.", "emotion": "neutral"},
+    ]})
+    director = _make_director(sm, mock_fn=lambda t, temperature=0.1: good)
+    n_lines = director.process_chapter(ch_id)
+    assert n_lines == 2, "Faithful result should be kept (not collapsed to fallback)"
+    print("  PASS test_full_coverage_accepts_result")
+
+
 def test_context_manager_raises_without_model():
     """Verify __enter__ raises FileNotFoundError when model file is missing."""
     sm = _tmp_sm()
@@ -284,6 +321,8 @@ TESTS = [
     test_process_chapter_multiple_chunks,
     test_retry_on_bad_json_then_succeed,
     test_fallback_on_total_failure,
+    test_word_loss_triggers_fallback,
+    test_full_coverage_accepts_result,
     test_context_manager_raises_without_model,
     test_call_llm_raises_outside_context,
 ]

@@ -68,21 +68,26 @@ from state_manager import StateManager
 # over the speaker timbre (0 = pure timbre, 1 = full emotion).
 # "neutral" maps to an all-zero vector with alpha 0 → pure timbre (no emotion).
 # Tune these to taste; they are the dial for the whole audiobook's expressiveness.
+# emo_alpha is capped at ~0.7. IndexTTS2 grows unstable / mechanical-sounding
+# when a single-emotion vector is blended at very high alpha (0.85-1.0) — it is
+# pushed out of the timbre distribution it was conditioned on. 0.45-0.70 keeps
+# the emotion clearly audible while preserving natural prosody. Adjust the whole
+# audiobook's expressiveness globally via cfg["emo_alpha_scale"].
 INDEXTTS2_EMOTION_VECTORS: dict[str, "tuple[list[float], float]"] = {
     #            [hap, ang, sad, afr, dis, mel, sur, calm]
     "neutral":   ([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 0.0),
-    "whispers":  ([0.0, 0.0, 0.1, 0.0, 0.0, 0.2, 0.0, 0.6], 0.5),
-    "angry":     ([0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 0.85),
-    "sad":       ([0.0, 0.0, 0.9, 0.0, 0.0, 0.3, 0.0, 0.0], 0.85),
-    "excited":   ([0.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.0], 0.85),
-    "commanding":([0.0, 0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.6], 0.70),
-    "frightened":([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.2, 0.0], 0.90),
-    "confused":  ([0.0, 0.0, 0.0, 0.2, 0.0, 0.2, 0.5, 0.0], 0.70),
-    "pleading":  ([0.0, 0.0, 0.6, 0.3, 0.0, 0.0, 0.0, 0.0], 0.80),
-    "cold":      ([0.0, 0.15, 0.0, 0.0, 0.1, 0.1, 0.0, 0.6], 0.50),
-    "laughing":  ([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3, 0.0], 0.85),
-    "sarcastic": ([0.3, 0.2, 0.0, 0.0, 0.3, 0.0, 0.0, 0.3], 0.70),
-    "desperate": ([0.0, 0.0, 0.5, 0.6, 0.0, 0.2, 0.0, 0.0], 0.90),
+    "whispers":  ([0.0, 0.0, 0.1, 0.0, 0.0, 0.2, 0.0, 0.6], 0.45),
+    "angry":     ([0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 0.65),
+    "sad":       ([0.0, 0.0, 0.9, 0.0, 0.0, 0.3, 0.0, 0.0], 0.65),
+    "excited":   ([0.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.0], 0.65),
+    "commanding":([0.0, 0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.6], 0.60),
+    "frightened":([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.2, 0.0], 0.70),
+    "confused":  ([0.0, 0.0, 0.0, 0.2, 0.0, 0.2, 0.5, 0.0], 0.55),
+    "pleading":  ([0.0, 0.0, 0.6, 0.3, 0.0, 0.0, 0.0, 0.0], 0.65),
+    "cold":      ([0.0, 0.15, 0.0, 0.0, 0.1, 0.1, 0.0, 0.6], 0.45),
+    "laughing":  ([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3, 0.0], 0.65),
+    "sarcastic": ([0.3, 0.2, 0.0, 0.0, 0.3, 0.0, 0.0, 0.3], 0.55),
+    "desperate": ([0.0, 0.0, 0.5, 0.6, 0.0, 0.2, 0.0, 0.0], 0.70),
 }
 
 
@@ -205,14 +210,32 @@ SPEAKER_ALIASES: dict[str, str] = {
 
 # ── Default IndexTTS2 config ──────────────────────────────────────────────────
 _DEFAULT_CFG = {
-    "use_fp16":       True,    # half precision — fits the RTX 4070 comfortably
+    # use_fp16=False (full precision) measurably improves naturalness — half
+    # precision added a subtle "robotic" edge in A/B testing. The RTX 4070 still
+    # fits IndexTTS2 in fp32 since the LLM is never co-resident.
+    "use_fp16":       False,
     "use_deepspeed":  False,   # deepspeed often fails to build on Windows; off by default
     "use_cuda_kernel": False,  # BigVGAN custom CUDA kernel — off for portability
     "max_retries":    2,       # retries on a failed generation
     "max_line_chars": 400,     # lines longer than this are split at sentence boundaries
     "emo_alpha_scale": 1.0,    # global multiplier on per-emotion alpha (master dial)
     "config_name":    "config.yaml",  # IndexTTS2 config filename inside model_dir
+    # GPT sampling — tuned for smoother long-form narration. Larger segments mean
+    # fewer prosody seams (IndexTTS2 default 120 chops mid-sentence); more beams
+    # yields cleaner generation. Passed straight to IndexTTS2.infer().
+    "max_text_tokens_per_segment": 200,
+    "num_beams":      5,
 }
+
+
+# Non-speech stage directions the LLM occasionally emits inside asterisks.
+# These are deleted; any other *emphasised* text keeps its content.
+_STAGE_DIRECTION_RE = re.compile(
+    r'\*(?:sighs?|pauses?|laughs?|chuckles?|giggles?|groans?|grunts?|gasps?|'
+    r'coughs?|snorts?|scoffs?|hums?|exhales?|inhales?|sniffs?|sobs?|'
+    r'clears throat|beat|silence)\*',
+    re.IGNORECASE,
+)
 
 
 def _normalize_text(text: str) -> str:
@@ -224,9 +247,11 @@ def _normalize_text(text: str) -> str:
     # Unicode quotes → ASCII
     text = text.replace('“', '"').replace('”', '"')
     text = text.replace('‘', "'").replace('’', "'")
-    # Strip italic/emphasis markers but keep their content.
-    # Only remove short pure-lowercase LLM stage directions like *sighs*, *pauses*.
-    text = re.sub(r'\*([a-z]{1,20}s?)\*', '', text)          # *sighs* → gone
+    # Strip italic/emphasis markers but keep their content. Only a known
+    # vocabulary of LLM stage directions is removed outright — a generic
+    # "any lowercase word" rule would delete legitimately emphasised words
+    # like *enormous* from the narration.
+    text = _STAGE_DIRECTION_RE.sub('', text)                  # *sighs* → gone
     text = re.sub(r'\*([^*]{1,120})\*', r'\1', text)          # *inner thought* → inner thought
     # Strip square brackets but KEEP their content (e.g. [Aspect of the Void]).
     text = re.sub(r'\[([^\]]*)\]', r'\1', text)
@@ -433,9 +458,13 @@ class TTSEngine:
 
             ref_path, ref_text = ref_info
 
+            # Note when the line landed on the _default voice (uses the same
+            # alias normalisation as _resolve_ref_audio so the flag is accurate).
+            _norm      = line["speaker"].strip().title()
+            _canonical = SPEAKER_ALIASES.get(_norm, _norm)
             using_fallback = (
-                f"{line['speaker']}_{line['emotion']}" not in voice_map
-                and line["speaker"] not in voice_map
+                f"{_canonical}_{line['emotion']}" not in voice_map
+                and _canonical not in voice_map
             )
 
             raw_text              = _normalize_text(line["text"])
@@ -502,18 +531,45 @@ class TTSEngine:
 
     @staticmethod
     def _split_long_line(text: str, max_chars: int) -> list:
-        """Split text at sentence boundaries when it exceeds max_chars."""
+        """Split text at sentence boundaries when it exceeds max_chars.
+        A single sentence longer than max_chars is hard-split at the last
+        comma (or space) before the limit so no segment can overflow."""
         if len(text) <= max_chars:
             return [text]
-        sentences = re.split(r'(?<=[.!?])\s+', text)
+
+        def hard_split(sent: str) -> list:
+            parts = []
+            while len(sent) > max_chars:
+                cut = sent.rfind(',', max_chars // 2, max_chars)
+                if cut != -1:
+                    head, sent = sent[:cut + 1], sent[cut + 1:]   # keep the comma
+                else:
+                    cut = sent.rfind(' ', max_chars // 2, max_chars)
+                    if cut != -1:
+                        head, sent = sent[:cut], sent[cut + 1:]
+                    else:
+                        head, sent = sent[:max_chars], sent[max_chars:]
+                parts.append(head.strip())
+                sent = sent.strip()
+            if sent:
+                parts.append(sent)
+            return parts
+
+        units: list = []
+        for sent in re.split(r'(?<=[.!?])\s+', text):
+            if len(sent) > max_chars:
+                units.extend(hard_split(sent))
+            else:
+                units.append(sent)
+
         chunks, cur = [], ""
-        for sent in sentences:
-            if cur and len(cur) + 1 + len(sent) <= max_chars:
-                cur += " " + sent
+        for unit in units:
+            if cur and len(cur) + 1 + len(unit) <= max_chars:
+                cur += " " + unit
             else:
                 if cur:
                     chunks.append(cur)
-                cur = sent
+                cur = unit
         if cur:
             chunks.append(cur)
         return chunks or [text]
@@ -612,6 +668,8 @@ class TTSEngine:
                 text=text,
                 output_path=tmp.name,
                 verbose=False,
+                max_text_tokens_per_segment=self.cfg["max_text_tokens_per_segment"],
+                num_beams=self.cfg["num_beams"],
             )
             if emo_vector is not None:
                 infer_kwargs["emo_vector"] = emo_vector

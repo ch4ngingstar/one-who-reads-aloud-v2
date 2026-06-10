@@ -30,7 +30,12 @@ import tempfile
 import wave
 from pathlib import Path
 
-from state_manager import StateManager
+from state_manager import StateManager, _resolve_stored_path
+
+
+def _concat_entry(p: Path) -> str:
+    """FFmpeg concat-demuxer entry with single quotes escaped ('\\'')."""
+    return "file '{}'".format(p.as_posix().replace("'", r"'\''"))
 
 
 # ── Config defaults ───────────────────────────────────────────────────────────
@@ -116,7 +121,7 @@ class AudioAssembler:
             tmp_path = Path(tmp)
 
             # Determine silence parameters from first source WAV
-            first_wav_path = Path(tts_done[0]["audio_path"])
+            first_wav_path = _resolve_stored_path(tts_done[0]["audio_path"])
             params = self._read_wav_params(first_wav_path)
 
             # Generate silence WAVs for each unique gap duration
@@ -174,10 +179,10 @@ class AudioAssembler:
                     else self.cfg["inter_line_silence_ms"]
                 )
                 sil = silence_paths[gap_ms]
-                entries.append(f"file '{sil.as_posix()}'")
+                entries.append(_concat_entry(sil))
 
-            audio_path = Path(line["audio_path"]).resolve().as_posix()
-            entries.append(f"file '{audio_path}'")
+            audio_path = _resolve_stored_path(line["audio_path"]).resolve()
+            entries.append(_concat_entry(audio_path))
 
         return "\n".join(entries)
 

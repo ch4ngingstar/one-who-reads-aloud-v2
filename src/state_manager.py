@@ -113,6 +113,22 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# Repo root (parent of src/). Legacy DB rows store paths relative to it; some
+# CWD=src runs wrote the same relative paths under src/. Used to resolve both.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _resolve_stored_path(p: "str | Path") -> Path:
+    path = Path(p)
+    if path.is_absolute():
+        return path
+    root_candidate = _REPO_ROOT / path
+    if root_candidate.exists():
+        return root_candidate
+    src_candidate = _REPO_ROOT / "src" / path
+    return src_candidate if src_candidate.exists() else root_candidate
+
+
 class StateManager:
     """
     Thread-safe SQLite state manager for the audiobook pipeline.
@@ -230,6 +246,14 @@ class StateManager:
             ).fetchone()
             return dict(row) if row else None
 
+    def list_projects(self) -> list:
+        """All projects (newest first) for the UI project picker."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM projects ORDER BY created_at DESC"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
     def get_all_chapters(self, project_id: int) -> list:
         with self._conn() as conn:
             rows = conn.execute(
@@ -304,9 +328,12 @@ class StateManager:
                 (_now(), chapter_id),
             ).rowcount
         for path in line_paths:
-            p = Path(path)
-            if p.exists():
-                p.unlink()
+            p = _resolve_stored_path(path)
+            try:
+                if p.exists():
+                    p.unlink()
+            except OSError:
+                pass  # locked/unreadable file must not block the DB reset
         return n > 0
 
     # ── Chunk queries ─────────────────────────────────────────────────────────

@@ -29,6 +29,7 @@ DATA FLOW into Module 8 (Next.js):
 
 import asyncio
 import json
+import re
 import sqlite3
 import threading
 from contextlib import asynccontextmanager
@@ -135,6 +136,13 @@ class PipelineManager:
     ) -> None:
         if self.status == "running":
             raise ValueError("Pipeline is already running.")
+        if self.thread and self.thread.is_alive():
+            # stop() was called but the orchestrator is still finishing the
+            # current chapter — starting now would double-load models in VRAM.
+            raise ValueError(
+                "Pipeline is still finishing the current chapter. "
+                "Try again in a moment."
+            )
 
         kwargs = {}
         if llm_director_cls: kwargs["llm_director_cls"] = llm_director_cls
@@ -152,7 +160,8 @@ class PipelineManager:
         def _run() -> None:
             try:
                 self.last_results = self.orchestrator.run()
-                self.status = "complete"
+                # A user-initiated stop must not be reported as "complete".
+                self.status = "stopped" if self.orchestrator.stopped else "complete"
             except Exception as exc:
                 self.status = "error"
                 self._on_progress({"type": "pipeline_error", "error": str(exc)})
@@ -187,8 +196,28 @@ class PipelineManager:
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
-_SRC_DIR = Path(__file__).parent
-_DATA_DIR = _SRC_DIR / "data"
+# All runtime paths are anchored absolutely so behaviour does not depend on the
+# CWD uvicorn happens to be launched from (start.ps1 uses src/, manual runs use
+# the repo root — both must hit the same DB and audio directories).
+_SRC_DIR  = Path(__file__).resolve().parent
+_ROOT_DIR = _SRC_DIR.parent
+_DATA_DIR = _SRC_DIR / "data"              # DB + uploaded voices (legacy layout)
+_VOICES_DIR    = _DATA_DIR / "voices"
+_AUDIO_WAV_DIR = _ROOT_DIR / "data" / "audio"
+_AUDIO_MP3_DIR = _ROOT_DIR / "data" / "output"
+
+
+def _resolve_data_path(p: "str | Path") -> Path:
+    """Resolve a possibly-relative DB-stored path. Legacy rows hold paths
+    relative to the repo root; fall back to src/ for runs made with CWD=src."""
+    path = Path(p)
+    if path.is_absolute():
+        return path
+    root_candidate = _ROOT_DIR / path
+    if root_candidate.exists():
+        return root_candidate
+    src_candidate = _SRC_DIR / path
+    return src_candidate if src_candidate.exists() else root_candidate
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -239,11 +268,22 @@ async def create_project(
         raise HTTPException(status_code=400,
                             detail=f"EPUB not found: {req.epub_path}")
 
-    parsed      = parse_epub(req.epub_path)
+    # Parsing is CPU-heavy (spaCy over hundreds of chapters) — keep it off the
+    # event loop so /api/health and SSE heartbeats stay responsive.
+    parsed      = await asyncio.to_thread(parse_epub, req.epub_path)
     project_id  = sm.seed_project(parsed)
     project     = sm.get_project(epub_path.stem)
     progress    = sm.get_progress(project_id)
     return {"project_id": project_id, "project": project, "progress": progress}
+
+
+@app.get("/api/projects")
+async def list_projects(sm: StateManager = Depends(get_sm)):
+    """All projects with per-project progress, for the UI project picker."""
+    projects = sm.list_projects()
+    for p in projects:
+        p["progress"] = sm.get_progress(p["id"])
+    return {"projects": projects}
 
 
 @app.get("/api/project/{name}")
@@ -297,9 +337,9 @@ async def start_pipeline(
         epub_path         = project["source_epub"],
         llm_model_path    = req.llm_model_path,
         tts_model_dir     = model_dir,
-        db_path           = "data/pipeline.db",
-        audio_wav_dir     = "data/audio",
-        audio_mp3_dir     = "data/output",
+        db_path           = str(_DATA_DIR / "pipeline.db"),
+        audio_wav_dir     = str(_AUDIO_WAV_DIR),
+        audio_mp3_dir     = str(_AUDIO_MP3_DIR),
         speakers          = req.speakers,
         chapter_range     = ch_range,
         output_format     = req.output_format,
@@ -364,7 +404,7 @@ async def delete_chapter_audio(
         raise HTTPException(status_code=404, detail="Chapter not found.")
     audio_path = row["output_audio_path"]
     if audio_path:
-        p = Path(audio_path)
+        p = _resolve_data_path(audio_path)
         if p.exists():
             p.unlink()
     sm.delete_chapter_audio(chapter_id)
@@ -376,10 +416,26 @@ async def reset_chapter(
     chapter_id: int,
     sm: StateManager = Depends(get_sm),
 ):
-    """Reset a chapter to pending so the pipeline will re-process it."""
+    """Reset a chapter to pending so the pipeline will re-process it.
+    Also removes the assembled audio file so no orphan is left on disk."""
+    with sm._conn() as conn:
+        row = conn.execute(
+            "SELECT output_audio_path FROM chapters WHERE id=?", (chapter_id,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Chapter not found.")
+
     ok = sm.reset_chapter_to_pending(chapter_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Chapter not found.")
+
+    if row["output_audio_path"]:
+        p = _resolve_data_path(row["output_audio_path"])
+        if p.exists():
+            try:
+                p.unlink()
+            except OSError:
+                pass  # file locked (e.g. playing) — DB is already reset
     return {"reset": chapter_id}
 
 
@@ -402,6 +458,9 @@ async def set_voice(req: VoiceSet, sm: StateManager = Depends(get_sm)):
             "ref_text": req.ref_text}
 
 
+_ALLOWED_VOICE_EXTS = {".wav", ".mp3", ".flac", ".ogg"}
+
+
 @app.post("/api/voices/upload", status_code=201)
 async def upload_voice(
     speaker:  str   = Form(...),
@@ -409,11 +468,31 @@ async def upload_voice(
     file:     UploadFile = File(...),
     sm:       StateManager = Depends(get_sm),
 ):
-    """Upload a WAV reference clip for a speaker, with optional transcript."""
-    voices_dir = Path("data/voices")
-    voices_dir.mkdir(parents=True, exist_ok=True)
-    dest = voices_dir / f"{speaker.lower().replace(' ', '_')}.wav"
+    """Upload a reference clip for a speaker, with optional transcript."""
+    speaker = speaker.strip()
+    if not speaker:
+        raise HTTPException(status_code=400, detail="Speaker name is required.")
+
+    # Slug prevents path traversal / illegal filename characters.
+    slug = re.sub(r"[^a-z0-9]+", "_", speaker.lower()).strip("_")
+    if not slug:
+        raise HTTPException(status_code=400,
+                            detail=f"Speaker name '{speaker}' has no usable characters.")
+
+    ext = Path(file.filename or "").suffix.lower() or ".wav"
+    if ext not in _ALLOWED_VOICE_EXTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported audio format '{ext}'. "
+                   f"Allowed: {', '.join(sorted(_ALLOWED_VOICE_EXTS))}"
+        )
+
     content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    _VOICES_DIR.mkdir(parents=True, exist_ok=True)
+    dest = _VOICES_DIR / f"{slug}{ext}"
     dest.write_bytes(content)
     sm.set_voice(speaker, str(dest), ref_text)
     return {"speaker": speaker, "ref_audio_path": str(dest), "ref_text": ref_text}
@@ -455,11 +534,16 @@ async def serve_audio(
             (chapter_id,),
         ).fetchone()
 
-    db_path  = Path(row["output_audio_path"]) if row and row["output_audio_path"] else None
-    mp3_path = Path("data/output") / f"ch_{chapter_id:04d}.mp3"
-    wav_path = Path("data/output") / f"ch_{chapter_id:04d}.wav"
+    db_path = (_resolve_data_path(row["output_audio_path"])
+               if row and row["output_audio_path"] else None)
+    candidates = [db_path]
+    # Default naming convention, checked in both historical output locations
+    # (repo-root data/output for manual runs, src/data/output for CWD=src runs).
+    for base in (_AUDIO_MP3_DIR, _DATA_DIR / "output"):
+        candidates.append(base / f"ch_{chapter_id:04d}.mp3")
+        candidates.append(base / f"ch_{chapter_id:04d}.wav")
 
-    for candidate in filter(None, [db_path, mp3_path, wav_path]):
+    for candidate in filter(None, candidates):
         if candidate.exists():
             return FileResponse(
                 str(candidate),
@@ -494,7 +578,8 @@ async def event_stream(
                 try:
                     event = await asyncio.wait_for(q.get(), timeout=1.0)
                     yield f"data: {json.dumps(event)}\n\n"
-                    if event.get("type") in ("pipeline_done", "pipeline_error"):
+                    if event.get("type") in ("pipeline_done", "pipeline_error",
+                                             "pipeline_stopped"):
                         break
                 except asyncio.TimeoutError:
                     yield ": ping\n\n"   # keep-alive

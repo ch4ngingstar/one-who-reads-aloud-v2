@@ -186,6 +186,11 @@ class PipelineOrchestrator:
         self._stop_event.clear()
         self._pause_event.set()  # unblock if paused so the stop check is reached
 
+    @property
+    def stopped(self) -> bool:
+        """True once stop() has been requested (cleared = stopped)."""
+        return not self._stop_event.is_set()
+
     # ── Setup ─────────────────────────────────────────────────────────────────
 
     def _setup(self) -> None:

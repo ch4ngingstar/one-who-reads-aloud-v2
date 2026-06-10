@@ -103,7 +103,10 @@ def _strip_html(html_bytes: bytes) -> tuple[str, list[str]]:
     paragraphs = []
     for p in soup.find_all("p"):
         text = re.sub(r"\s+", " ", p.get_text(separator=" ", strip=True))
-        if len(text) > 25:
+        # Keep anything containing letters — short dramatic lines ("No.",
+        # "Run!") are real story content. Drop only decorative separators
+        # (***, ---, ◆◆◆) and empty paragraphs.
+        if text and re.search(r"[A-Za-z]", text):
             paragraphs.append(text)
 
     return title, paragraphs

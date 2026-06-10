@@ -39,6 +39,7 @@ OUTPUT (to Module 2 StateManager):
   lines: [{ "line_index": int, "speaker": str, "text": str, "emotion": str }]
 """
 
+import collections
 import gc
 import json
 import re
@@ -84,6 +85,11 @@ _DEFAULT_CFG = {
     "max_tokens":   6144,
     "retry_temp":   0.2,    # low retry temperature — avoid hallucination on second attempt
     "max_retries":  3,
+    # Minimum fraction of source CONTENT words (len>=4) that must survive into the
+    # diarized output. Below this, the LLM silently dropped sentences → retry, then
+    # fall back to a verbatim Narrator line. 0.96 cleanly separates real loss
+    # (measured 49–94%) from normal normalisation noise (98.5–100%).
+    "min_word_coverage": 0.96,
 }
 
 # ── System prompt ──────────────────────────────────────────────────────────────
@@ -346,31 +352,106 @@ def _sanitize_text(text: str) -> str:
     return _JSON_LEAK_RE.sub("", text).strip().strip("'\"").strip()
 
 
+# First-/second-person markers that signal genuine spoken (or inner-monologue)
+# dialogue. If any appear, the line is real speech and must NOT be reclassified.
+_DIALOGUE_PERSON_MARKERS = frozenset({
+    "i", "i'm", "i'll", "i've", "i'd", "me", "my", "mine", "myself",
+    "we", "we're", "we'll", "we've", "us", "our", "ours", "ourselves",
+    "you", "you're", "you'll", "you've", "your", "yours", "yourself",
+    "yourselves", "let's",
+})
+
+# Third-person actor pronouns. Their presence (without any first/second-person
+# marker) in a sentence of real length is a strong narration signal.
+_THIRD_PERSON_ACTORS = frozenset({
+    "he", "she", "they", "him", "her", "them", "his", "their", "its",
+})
+
+# Min word count before a bare third-person pronoun counts as narration.
+# Guards short third-person dialogue like "He is here." from being nuked.
+_NARRATION_MIN_WORDS = 6
+
+
 def _is_narrator_misattribution(speaker: str, text: str) -> bool:
     """
-    Safety net for the most common LLM mistake: assigning prose that describes
-    a character as that character's dialogue.
+    Safety net for the most common LLM mistake: assigning prose that *describes*
+    a character (their actions, the scene around them) as that character's
+    spoken dialogue. The LLM strips quotes from real dialogue (R3), so by the
+    time a line reaches here we cannot rely on quotation marks — we instead read
+    the grammatical person of the sentence.
 
-    Patterns caught:
-      "Sunny walked forward..."     → first word == speaker name
-      "Sunny's eyes narrowed..."    → first word == speaker name + possessive "'s"
-      "He continued the slaughter..." assigned to Sunny → third-person pronoun
+    A line is flagged as misattributed narration when, for a NAMED speaker:
+      1. The first word is the speaker's name / possessive   ("Sunny walked...")
+      2. The first word is a third-person pronoun             ("He sighed...")
+      3. The speaker is referred to by their own name in third person, with no
+         first/second-person speech marker  ("...Sunny yawned, stretching.")
+      4. It is a sentence of real length driven by a third-person actor pronoun
+         and contains no first/second-person speech marker
+         ("After a while, he sighed and opened his eyes.")
+
+    Lines containing I/you/my/we (genuine speech or inner monologue) are always
+    left untouched, even when they also mention the speaker by name
+    ("My name is Nephis." stays Nephis).
     """
     if not text or not speaker or speaker in ("Narrator", "Unknown"):
         return False
-    speaker_lower = speaker.lower()
-    first_word = text.split()[0].rstrip(",.!?:").lower() if text.split() else ""
 
-    # "Sunny walked..." or "Sunny's eyes narrowed..."
+    words = text.split()
+    if not words:
+        return False
+
+    speaker_lower = speaker.lower()
+    first_word = words[0].rstrip(",.!?:;").lower()
+
+    # Rule 1 — first word is the speaker's name / possessive.
     if first_word in (speaker_lower, speaker_lower + "'s"):
         return True
 
-    # Third-person pronouns/possessives as first word → always narration, never dialogue.
-    # "He walked...", "She sighed...", "His eyes...", "Her hand..." etc.
-    if first_word in ("he", "she", "they", "his", "her", "their", "it", "its"):
+    # Rule 2 — first word is a third-person pronoun.
+    if first_word in _THIRD_PERSON_ACTORS:
+        return True
+
+    # Tokenise once, stripping surrounding punctuation and quote glyphs.
+    lower_words = [w.strip(",.!?:;\"'“”‘’()").lower() for w in words]
+
+    # Genuine first/second-person speech (or inner monologue) — never reclassify.
+    if any(w in _DIALOGUE_PERSON_MARKERS for w in lower_words):
+        return False
+
+    # Rule 3 — the speaker narrated by their own name in third person.
+    if speaker_lower in lower_words:
+        return True
+
+    # Rule 4 — a real-length sentence driven by a third-person actor pronoun.
+    if (len(words) >= _NARRATION_MIN_WORDS
+            and any(w in _THIRD_PERSON_ACTORS for w in lower_words)):
         return True
 
     return False
+
+
+_CONTENT_WORD_RE = re.compile(r"[a-z0-9']+")
+
+
+def _content_word_coverage(src: str, out: str) -> float:
+    """
+    Fraction of source 'content words' (length >= 4) that survive into the
+    diarized output. Short tokens (articles, numbers, contractions) are excluded
+    because text normalisation legitimately alters them (e.g. "26" <-> "twenty-six"),
+    whereas dropped sentences remove real content words. Returns 1.0 when the
+    source has no content words. Used to catch silent LLM omission.
+    """
+    def counts(text: str) -> "collections.Counter":
+        return collections.Counter(
+            w for w in _CONTENT_WORD_RE.findall(text.lower()) if len(w) >= 4
+        )
+
+    src_counts = counts(src)
+    total = sum(src_counts.values())
+    if total == 0:
+        return 1.0
+    missing = sum((src_counts - counts(out)).values())
+    return 1.0 - missing / total
 
 
 def _parse_lines(response_text: str, line_offset: int = 0) -> list[dict]:
@@ -521,15 +602,26 @@ class LLMDirector:
             temp = (self.cfg["temperature"] if attempt == 0
                     else self.cfg["retry_temp"])
             try:
-                raw = self._call_llm(text, temperature=temp)
-                return _parse_lines(raw, line_offset=line_offset)
+                raw   = self._call_llm(text, temperature=temp)
+                lines = _parse_lines(raw, line_offset=line_offset)
+
+                # Guard against silent omission: the LLM sometimes drops whole
+                # sentences despite rule R1. Verify content words survived before
+                # accepting the result; otherwise retry (then fall back below).
+                coverage = _content_word_coverage(
+                    text, " ".join(ln["text"] for ln in lines))
+                if coverage < self.cfg["min_word_coverage"]:
+                    raise ValueError(
+                        f"word loss: only {coverage:.0%} of source content words "
+                        f"preserved (min {self.cfg['min_word_coverage']:.0%})")
+                return lines
             except (ValueError, json.JSONDecodeError, KeyError) as e:
                 last_error = e
-                print(f"[llm]   Parse error (attempt {attempt + 1}): {e}")
+                print(f"[llm]   Parse/coverage error (attempt {attempt + 1}): {e}")
                 time.sleep(0.5)
 
         print(f"[llm]   WARNING: all retries failed ({last_error}). "
-              f"Falling back to single Narrator line.")
+              f"Falling back to single Narrator line (preserves all text).")
         return [{
             "line_index": line_offset,
             "speaker":    "Narrator",

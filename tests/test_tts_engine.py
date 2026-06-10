@@ -442,11 +442,25 @@ def test_split_at_sentence_boundary():
     print("  PASS test_split_at_sentence_boundary")
 
 
-def test_split_single_oversized_sentence_kept_intact():
+def test_split_single_oversized_sentence_hard_split():
+    # A single sentence with no boundaries is hard-split so that no segment
+    # exceeds max_chars (overlong segments destabilise IndexTTS2 generation).
     text = "A" * 500 + "."
     result = TTSEngine._split_long_line(text, 400)
-    assert result == [text], f"Should return [text] unchanged, got {len(result)} chunks"
-    print("  PASS test_split_single_oversized_sentence_kept_intact")
+    assert len(result) >= 2, f"Expected a hard split, got {len(result)} chunk(s)"
+    assert all(len(c) <= 400 for c in result), \
+        f"Segment exceeds max_chars: {[len(c) for c in result]}"
+    assert "".join(result) == text, "Hard split must not lose characters"
+    print("  PASS test_split_single_oversized_sentence_hard_split")
+
+
+def test_split_oversized_sentence_prefers_word_boundary():
+    text = ("word " * 120).strip() + "."   # ~600 chars, no sentence breaks
+    result = TTSEngine._split_long_line(text, 400)
+    assert all(len(c) <= 400 for c in result), \
+        f"Segment exceeds max_chars: {[len(c) for c in result]}"
+    assert all(not c.startswith("ord") for c in result), "Split mid-word"
+    print("  PASS test_split_oversized_sentence_prefers_word_boundary")
 
 
 def test_split_multi_sentence_packs_greedily():
@@ -523,6 +537,17 @@ def test_process_chapter_splits_long_line():
 
 # ── _normalize_text smoke test ────────────────────────────────────────────────
 
+def test_normalize_keeps_emphasised_words():
+    # Regression: *enormous* must keep its content — only known stage
+    # directions like *sighs* are deleted outright.
+    out = _normalize_text("It was *enormous*.")
+    assert "enormous" in out, f"Emphasised word was deleted: {out!r}"
+    out2 = _normalize_text("*sighs* Fine, I will go.")
+    assert "sighs" not in out2.lower(), f"Stage direction not removed: {out2!r}"
+    assert "Fine, I will go" in out2
+    print("  PASS test_normalize_keeps_emphasised_words")
+
+
 def test_normalize_text_basic():
     out = _normalize_text("“Hello—world…”")
     assert "—" not in out and "…" not in out and "“" not in out
@@ -558,12 +583,14 @@ TESTS = [
     test_emotion_override_voice_used,
     test_split_short_line_unchanged,
     test_split_at_sentence_boundary,
-    test_split_single_oversized_sentence_kept_intact,
+    test_split_single_oversized_sentence_hard_split,
+    test_split_oversized_sentence_prefers_word_boundary,
     test_split_multi_sentence_packs_greedily,
     test_concat_wavs_valid_output,
     test_concat_wavs_frame_count,
     test_process_chapter_splits_long_line,
     test_normalize_text_basic,
+    test_normalize_keeps_emphasised_words,
 ]
 
 if __name__ == "__main__":
