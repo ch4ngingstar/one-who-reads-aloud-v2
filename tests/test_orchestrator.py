@@ -434,6 +434,47 @@ def test_error_chapter_resumes_from_synthesize():
     print("  PASS test_error_chapter_resumes_from_synthesize")
 
 
+def test_vram_barrier_is_delta_based():
+    """A high desktop baseline (e.g. browser holding 2 GB) must neither stall
+    the barrier nor fire a warning — only the pipeline's own delta counts."""
+    import orchestrator
+
+    cfg  = _make_config(vram_check_enabled=True, vram_wait_timeout_s=0)
+    orch = _make_orch(cfg)
+    real_query = orchestrator._query_vram_used_mb
+    try:
+        # Desktop holds 2000 MB; after LLM unload usage settled at 2300 MB.
+        # Old absolute check (limit 1000 MB) would warn; delta check must pass.
+        orchestrator._query_vram_used_mb = lambda: 2300
+        orch._vram_baseline_mb = 2000
+        orch._vram_barrier()
+        assert not any(e["type"] == "vram_warning" for e in orch.events), (
+            "barrier warned even though usage is within baseline + allowance"
+        )
+
+        # Genuine leak: 3 GB above baseline — must warn with the delta limit.
+        orchestrator._query_vram_used_mb = lambda: 5000
+        orch._vram_barrier()
+        warnings = [e for e in orch.events if e["type"] == "vram_warning"]
+        assert len(warnings) == 1, f"expected exactly one warning, got {warnings}"
+        assert warnings[0]["used_mb"]      == 5000
+        assert warnings[0]["threshold_mb"] == 2500   # baseline 2000 + 500 allowance
+        assert warnings[0]["baseline_mb"]  == 2000
+
+        # No baseline captured (snapshot failed) — falls back to absolute 1000.
+        orch.events.clear()
+        orch._vram_baseline_mb = -1
+        orchestrator._query_vram_used_mb = lambda: 1200
+        orch._vram_barrier()
+        warnings = [e for e in orch.events if e["type"] == "vram_warning"]
+        assert len(warnings) == 1
+        assert warnings[0]["threshold_mb"] == 1000
+    finally:
+        orchestrator._query_vram_used_mb = real_query
+
+    print("  PASS test_vram_barrier_is_delta_based")
+
+
 def test_idempotent_setup_does_not_duplicate_chapters():
     orch = _make_orch()
     orch._setup()
@@ -462,6 +503,7 @@ TESTS = [
     test_stop_during_run_finishes_current_chapter,
     test_events_deque_is_bounded,
     test_error_chapter_resumes_from_synthesize,
+    test_vram_barrier_is_delta_based,
 ]
 
 if __name__ == "__main__":

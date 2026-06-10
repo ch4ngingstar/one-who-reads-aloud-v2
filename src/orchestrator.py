@@ -6,10 +6,14 @@ per-stage error isolation, and a progress callback for the FastAPI SSE stream.
 
 VRAM LIFECYCLE ENFORCED HERE:
   For every chapter:
+    0. Baseline snapshot     [ VRAM held by desktop apps before the LLM loads ]
     1. LLMDirector context  [ loads ~8.5GB ] → process → [ purges VRAM ]
-    2. VRAM barrier check   [ asserts < 1 GB free before TTS ]
+    2. VRAM barrier check   [ waits until usage returns to ~baseline before TTS ]
     3. TTSEngine context     [ IndexTTS2 ~8GB ] → process → [ unloads model ]
     4. AudioAssembler.assemble_chapter()      [ CPU only, 0 VRAM ]
+
+  The barrier is delta-based: browsers/compositor VRAM is in the baseline and
+  cancels out, so only memory the *pipeline* added is waited on.
 
 RESUME LOGIC:
   pending   → run all three stages
@@ -26,7 +30,8 @@ PROGRESS EVENTS (emitted to callback and collected in self.events):
   { "type": "chapter_done",    "chapter_id": int, "audio_path": str }
   { "type": "chapter_error",   "chapter_id": int, "stage": str,  "error": str }
   { "type": "chapter_skip",    "chapter_id": int, "reason": str }
-  { "type": "vram_warning",    "used_mb": int,    "threshold_mb": int }
+  { "type": "vram_warning",    "used_mb": int,    "threshold_mb": int,
+                                "baseline_mb": int }
   { "type": "pipeline_done",   "success": int,    "error": int,  "skipped": int,
                                 "elapsed_s": float }
 """
@@ -59,7 +64,13 @@ _STAGES_FOR_STATUS = {
     # "error" is handled dynamically — see PipelineOrchestrator._stages_for_chapter()
 }
 
-_VRAM_WARNING_THRESHOLD_MB = 1000  # warn if > 1 GB VRAM used between stages
+# The pipeline may leave this much VRAM above the pre-LLM baseline before the
+# barrier warns. CUDA allocator caches and driver overhead make 0 unrealistic.
+_VRAM_DELTA_ALLOWANCE_MB = 500
+
+# Absolute fallback when no baseline could be captured (nvidia-smi failed at
+# snapshot time but works at barrier time — rare).
+_VRAM_FALLBACK_THRESHOLD_MB = 1000
 
 
 # ── Config dataclass ──────────────────────────────────────────────────────────
@@ -125,6 +136,7 @@ class PipelineOrchestrator:
         self._stop_event.set()    # set = running (not stopped)
         self.events: collections.deque = collections.deque(maxlen=500)
         self._current_stage: str = "unknown"
+        self._vram_baseline_mb: int = -1   # set per chapter, before the LLM loads
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -277,6 +289,13 @@ class PipelineOrchestrator:
         t0 = time.time()
         self._emit("stage_start", chapter_id=chapter_id, stage="diarize")
 
+        # Snapshot what the desktop already holds (browser, compositor, …) so
+        # the post-LLM barrier can wait on the pipeline's delta, not the total.
+        if self.cfg.vram_check_enabled:
+            self._vram_baseline_mb = _query_vram_used_mb()
+            if self._vram_baseline_mb >= 0:
+                print(f"[orch] VRAM baseline before LLM: {self._vram_baseline_mb} MB.")
+
         llm_cfg = {"n_gpu_layers": self.cfg.llm_n_gpu_layers}
         with self._llm_cls(
             self.cfg.llm_model_path,
@@ -338,30 +357,40 @@ class PipelineOrchestrator:
 
     def _vram_barrier(self) -> None:
         """
-        Polls VRAM usage after LLM unload until it drops below threshold or
+        Polls VRAM usage after LLM unload until it returns to within
+        _VRAM_DELTA_ALLOWANCE_MB of the pre-LLM baseline, or
         vram_wait_timeout_s expires.  Called between LLM exit and TTS enter.
+
+        Delta-based: VRAM held by other apps is part of the baseline, so a
+        browser using 2 GB does not stall the barrier or trigger warnings.
         """
         if not self.cfg.vram_check_enabled:
             return
+        baseline  = self._vram_baseline_mb
+        threshold = (baseline + _VRAM_DELTA_ALLOWANCE_MB
+                     if baseline >= 0 else _VRAM_FALLBACK_THRESHOLD_MB)
         timeout  = self.cfg.vram_wait_timeout_s
         deadline = time.time() + timeout
         while True:
             used_mb = _query_vram_used_mb()
             if used_mb < 0:
                 return  # nvidia-smi not available
-            if used_mb <= _VRAM_WARNING_THRESHOLD_MB:
-                print(f"[orch] VRAM barrier OK: {used_mb} MB used.")
+            if used_mb <= threshold:
+                print(f"[orch] VRAM barrier OK: {used_mb} MB used "
+                      f"(baseline {baseline} MB, limit {threshold} MB).")
                 return
             remaining = deadline - time.time()
             if remaining <= 0:
                 self._emit("vram_warning",
                            used_mb=used_mb,
-                           threshold_mb=_VRAM_WARNING_THRESHOLD_MB)
+                           threshold_mb=threshold,
+                           baseline_mb=baseline)
                 print(f"[orch] WARNING: {used_mb} MB VRAM still in use after "
-                      f"{timeout}s wait. TTS loading anyway — may OOM.")
+                      f"{timeout}s wait (baseline {baseline} MB, limit "
+                      f"{threshold} MB). TTS loading anyway — may OOM.")
                 return
-            print(f"[orch] VRAM barrier: {used_mb} MB used, waiting "
-                  f"({remaining:.0f}s left)...")
+            print(f"[orch] VRAM barrier: {used_mb} MB used, want ≤ {threshold} MB, "
+                  f"waiting ({remaining:.0f}s left)...")
             time.sleep(2)
 
     # ── Event emitter ─────────────────────────────────────────────────────────
