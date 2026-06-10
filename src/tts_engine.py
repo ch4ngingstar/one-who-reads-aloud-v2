@@ -221,10 +221,11 @@ _DEFAULT_CFG = {
     "emo_alpha_scale": 1.0,    # global multiplier on per-emotion alpha (master dial)
     "config_name":    "config.yaml",  # IndexTTS2 config filename inside model_dir
     # GPT sampling — tuned for smoother long-form narration. Larger segments mean
-    # fewer prosody seams (IndexTTS2 default 120 chops mid-sentence); more beams
-    # yields cleaner generation. Passed straight to IndexTTS2.infer().
+    # fewer prosody seams (IndexTTS2 default 120 chops mid-sentence). Beams stay
+    # at the IndexTTS2 default 3: 5 cost ~1.6× generation time for marginal gain
+    # (~90 min chapters with fp32). Passed straight to IndexTTS2.infer().
     "max_text_tokens_per_segment": 200,
-    "num_beams":      5,
+    "num_beams":      3,
 }
 
 
