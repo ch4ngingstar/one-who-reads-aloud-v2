@@ -39,6 +39,7 @@ logs/
 # ─── Debug / tooling artifacts ────────────────────────────
 .playwright-mcp/
 *.log
+.superpowers/
 
 # ─── Screenshots & scratch images (root-level captures) ───
 *.png
