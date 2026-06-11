@@ -60,10 +60,13 @@ class FakeTTSEngine:
 
     def process_chapter(self, chapter_id, progress_callback=None):
         lines = self.sm.get_pending_tts_lines(chapter_id)
-        for line in lines:
+        total = len(lines)
+        for i, line in enumerate(lines, start=1):
             self.sm.mark_line_tts_done(line["id"], f"/fake/audio/line_{line['id']}.wav")
+            if progress_callback:
+                progress_callback(i, total, line)
         self.sm.mark_chapter_status(chapter_id, "tts_done")
-        return len(lines)
+        return total
 
 
 class FakeAssembler:
@@ -486,6 +489,31 @@ def test_idempotent_setup_does_not_duplicate_chapters():
     print("  PASS test_idempotent_setup_does_not_duplicate_chapters")
 
 
+def test_tts_progress_event_carries_line_fields():
+    # The SSE event behind the Inspector's live stage must include the line.
+    orch = _make_orch()
+    orch.run()
+    evs = [e for e in orch.events if e["type"] == "tts_progress"]
+    assert evs, "expected tts_progress events from the fake TTS engine"
+    ev = evs[0]
+    assert ev["lines_done"] == 1
+    assert ev["speaker"] == "Narrator"
+    assert ev["text"]    == "Test line."
+    assert ev["emotion"] == "neutral"
+    print("  PASS test_tts_progress_event_carries_line_fields")
+
+
+def test_live_text_is_truncated():
+    from orchestrator import _truncate_live_text, _LIVE_TEXT_MAX_CHARS
+    long = "x" * 500
+    out = _truncate_live_text(long)
+    assert len(out) == _LIVE_TEXT_MAX_CHARS
+    assert out.endswith("…")
+    assert _truncate_live_text("short") == "short"
+    assert _truncate_live_text(None) == ""
+    print("  PASS test_live_text_is_truncated")
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 TESTS = [
@@ -504,6 +532,8 @@ TESTS = [
     test_events_deque_is_bounded,
     test_error_chapter_resumes_from_synthesize,
     test_vram_barrier_is_delta_based,
+    test_tts_progress_event_carries_line_fields,
+    test_live_text_is_truncated,
 ]
 
 if __name__ == "__main__":

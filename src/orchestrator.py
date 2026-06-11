@@ -68,6 +68,17 @@ _STAGES_FOR_STATUS = {
 # barrier warns. CUDA allocator caches and driver overhead make 0 unrealistic.
 _VRAM_DELTA_ALLOWANCE_MB = 500
 
+# tts_progress events carry the live line for the UI's Inspector stage; cap
+# the text so a single long paragraph can't bloat the SSE stream.
+_LIVE_TEXT_MAX_CHARS = 200
+
+
+def _truncate_live_text(text) -> str:
+    text = str(text or "")
+    if len(text) <= _LIVE_TEXT_MAX_CHARS:
+        return text
+    return text[: _LIVE_TEXT_MAX_CHARS - 1] + "…"
+
 # Absolute fallback when no baseline could be captured (nvidia-smi failed at
 # snapshot time but works at barrier time — rare).
 _VRAM_FALLBACK_THRESHOLD_MB = 1000
@@ -316,11 +327,15 @@ class PipelineOrchestrator:
         t0 = time.time()
         self._emit("stage_start", chapter_id=chapter_id, stage="synthesize")
 
-        def _tts_progress(lines_done: int, lines_total: int) -> None:
+        def _tts_progress(lines_done: int, lines_total: int, line: dict) -> None:
+            line = dict(line)  # sqlite3.Row compat
             self._emit("tts_progress",
                        chapter_id=chapter_id,
                        lines_done=lines_done,
-                       lines_total=lines_total)
+                       lines_total=lines_total,
+                       text=_truncate_live_text(line.get("text")),
+                       speaker=line.get("speaker"),
+                       emotion=line.get("emotion"))
 
         with self._tts_cls(
             self.sm,

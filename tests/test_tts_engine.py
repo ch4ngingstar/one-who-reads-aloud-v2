@@ -580,6 +580,9 @@ def test_progress_callback_receives_line():
     assert line["speaker"] == "Sunny"
     assert line["text"]    == "Hello there."
     assert line["emotion"] == "calm"
+    done1, total1, line1 = calls[1]
+    assert (done1, total1) == (2, 2)
+    assert line1["speaker"] == "Narrator"
     print("  PASS test_progress_callback_receives_line")
 
 
