@@ -415,14 +415,16 @@ class TTSEngine:
     def process_chapter(
         self,
         chapter_id: int,
-        progress_callback: "Callable[[int, int], None] | None" = None,
+        progress_callback: "Callable[[int, int, dict], None] | None" = None,
     ) -> int:
         """
         Synthesise all pending lines for a chapter.
         Returns the count of successfully generated lines.
         Advances chapter status to 'tts_done'.
 
-        progress_callback(lines_processed, lines_total) is called after every line.
+        progress_callback(lines_processed, lines_total, line) is called after
+        every line; `line` is the just-processed line dict (text/speaker/emotion)
+        so callers can surface the live line in progress events.
         """
         lines     = self.sm.get_pending_tts_lines(chapter_id)
         voice_map = self.sm.get_voice_map()
@@ -454,7 +456,7 @@ class TTSEngine:
                 print(f"[tts]   SKIP line {line['line_index']}: no voice for "
                       f"'{line['speaker']}' (tip: register sm.set_voice('_default', path))")
                 if progress_callback:
-                    progress_callback(processed, total)
+                    progress_callback(processed, total, line)
                 continue
 
             ref_path, ref_text = ref_info
@@ -510,7 +512,7 @@ class TTSEngine:
                 print(f"[tts]   ERR line {line['line_index']:>4}: {last_err}")
 
             if progress_callback:
-                progress_callback(processed, total)
+                progress_callback(processed, total, line)
 
         self.sm.mark_chapter_status(chapter_id, "tts_done")
         print(f"[tts] Chapter {chapter_id} done: "

@@ -555,6 +555,34 @@ def test_normalize_text_basic():
     print("  PASS test_normalize_text_basic")
 
 
+
+def test_progress_callback_receives_line():
+    # The callback must receive (lines_done, lines_total, line_dict) so the
+    # orchestrator can put the live line on the tts_progress SSE event.
+    sm = _tmp_sm()
+    ch_id = _seed_diarized_chapter(sm, [
+        {"line_index": 0, "speaker": "Sunny",    "text": "Hello there.", "emotion": "calm"},
+        {"line_index": 1, "speaker": "Narrator", "text": "He waited.",   "emotion": "neutral"},
+    ])
+    sm.set_voice("_default", str(_tmp_wav()), "ref text")
+    out = Path(tempfile.mkdtemp())
+    engine = _make_engine(sm, out, mock_synth=_mock_synth)
+
+    calls = []
+    engine.process_chapter(
+        ch_id,
+        progress_callback=lambda done, total, line: calls.append((done, total, line)),
+    )
+
+    assert len(calls) == 2, f"expected 2 callback calls, got {len(calls)}"
+    done, total, line = calls[0]
+    assert (done, total) == (1, 2)
+    assert line["speaker"] == "Sunny"
+    assert line["text"]    == "Hello there."
+    assert line["emotion"] == "calm"
+    print("  PASS test_progress_callback_receives_line")
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 TESTS = [
@@ -591,6 +619,7 @@ TESTS = [
     test_process_chapter_splits_long_line,
     test_normalize_text_basic,
     test_normalize_keeps_emphasised_words,
+    test_progress_callback_receives_line,
 ]
 
 if __name__ == "__main__":
