@@ -74,6 +74,13 @@ describe('pipelineReducer', () => {
     expect(s.toasts).toHaveLength(0)
   })
 
+  it('stage_start seeds activeChId when reconnecting mid-run (no prior chapter_start)', () => {
+    // Simulates page reload while pipeline is running — last_event is a stage_start.
+    const s = sse(initialPipelineState, ev({ type: 'stage_start', chapter_id: 256, stage: 'diarize' }))
+    expect(s.activeChId).toBe(256)
+    expect(s.activeStage).toBe('diarize')
+  })
+
   it('tracks connection and explicit status changes', () => {
     let s = pipelineReducer(initialPipelineState, { kind: 'connection', connected: false })
     expect(s.connected).toBe(false)

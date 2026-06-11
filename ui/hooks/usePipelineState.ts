@@ -83,6 +83,9 @@ export function pipelineReducer(s: PipelineUIState, a: PipelineAction): Pipeline
           if (typeof e.stage !== 'string') return next
           return {
             ...next,
+            // chapter_id is present on stage_start — carry it so reconnecting
+            // mid-chapter (after page reload) correctly seeds activeChId.
+            activeChId: typeof e.chapter_id === 'number' ? e.chapter_id : next.activeChId,
             activeStage: e.stage as Stage,
             liveLine: e.stage === 'synthesize' ? next.liveLine : null,
           }

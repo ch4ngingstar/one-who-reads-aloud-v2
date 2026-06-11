@@ -81,7 +81,12 @@ export default function CommandDeck() {
     try {
       const { project: p, progress: pr } = await getProject(name)
       setProject(p); setProgress(pr); setSideTab('voices'); setSelectedId(null); fetchChapters(p)
-      getPipelineStatus().then(s => dispatch({ kind: 'set-status', status: s.status })).catch(() => {})
+      getPipelineStatus().then(s => {
+        dispatch({ kind: 'set-status', status: s.status })
+        if ((s.status === 'running' || s.status === 'paused') && s.last_event) {
+          dispatch({ kind: 'sse', event: s.last_event, now: Date.now() })
+        }
+      }).catch(() => {})
       saveCfg({ projectName: name })
     } catch { /* */ }
   }, [fetchChapters, saveCfg, dispatch])
@@ -90,8 +95,14 @@ export default function CommandDeck() {
     refreshVoices()
     listProjects().then(({ projects: ps }) => setProjects(ps)).catch(() => {})
     // Always sync with the backend — the pipeline may still be running from a
-    // previous browser session.
-    getPipelineStatus().then(s => dispatch({ kind: 'set-status', status: s.status })).catch(() => {})
+    // previous browser session. Replay last_event so Inspector seeds activeChId/
+    // activeStage without waiting for the next SSE frame.
+    getPipelineStatus().then(s => {
+      dispatch({ kind: 'set-status', status: s.status })
+      if ((s.status === 'running' || s.status === 'paused') && s.last_event) {
+        dispatch({ kind: 'sse', event: s.last_event, now: Date.now() })
+      }
+    }).catch(() => {})
     let cfg: Partial<SavedConfig> = {}
     try { const r = localStorage.getItem(STORAGE_KEY); if (r) cfg = JSON.parse(r) } catch { /* */ }
     if (cfg.llmPath && !cfg.llmPath.includes('7b')) setLlmPath(cfg.llmPath)
