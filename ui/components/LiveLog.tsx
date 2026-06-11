@@ -52,8 +52,10 @@ function formatEvent(e: SSEEvent): string {
   }
 }
 
-export default function LiveLog({ events, open, onToggle, onClear }: {
+export default function LiveLog({ events, open, onToggle, onClear, embedded = false }: {
   events: SSEEvent[]; open: boolean; onToggle: () => void; onClear?: () => void
+  /** Fill the parent instead of docking as a collapsible bottom drawer. */
+  embedded?: boolean
 }) {
   const scrollRef  = useRef<HTMLDivElement>(null)
   const [follow,     setFollow]     = useState(true)
@@ -65,10 +67,10 @@ export default function LiveLog({ events, open, onToggle, onClear }: {
   // Autoscroll only while pinned to the bottom — scrolling up to read history
   // disengages follow; the Follow button re-pins.
   useEffect(() => {
-    if (open && follow && scrollRef.current) {
+    if ((open || embedded) && follow && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [shown.length, open, follow])
+  }, [shown.length, open, embedded, follow])
 
   function handleScroll() {
     const el = scrollRef.current
@@ -90,34 +92,47 @@ export default function LiveLog({ events, open, onToggle, onClear }: {
 
   return (
     <div
-      className={`flex flex-col transition-all duration-200 ${open ? 'h-52' : 'h-10'}`}
-      style={{ borderTop: '1px solid #27272A', background: '#000000' }}
+      className={embedded
+        ? 'flex flex-col h-full'
+        : `flex flex-col transition-all duration-200 ${open ? 'h-52' : 'h-10'}`}
+      style={embedded ? undefined : { borderTop: '1px solid #232323', background: '#000000' }}
     >
       {/* Toggle bar + log actions (siblings — buttons must not nest) */}
       <div className="flex items-center h-10 flex-shrink-0">
-        <button
-          className="flex items-center justify-between px-5 h-10 flex-1 min-w-0 text-left
-                     text-xs text-ink-muted hover:text-ink-secondary transition-colors duration-100"
-          onClick={onToggle}
-        >
-          <div className="flex items-center gap-3 min-w-0">
-            <span className="label flex-shrink-0">Live Log</span>
-            {events.length > 0 && (
-              <span className="text-[10px] text-ink-ghost font-mono flex-shrink-0">{events.length} events</span>
-            )}
-            {!open && last && (
-              <span className={`text-[10px] font-mono truncate ${lastColor}`}>
-                {formatEvent(last).slice(8)}
-              </span>
-            )}
+        {embedded ? (
+          <div className="flex items-center px-5 h-10 flex-1 min-w-0 text-xs text-ink-muted">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="label flex-shrink-0">Live Log</span>
+              {events.length > 0 && (
+                <span className="text-[10px] text-ink-ghost font-mono flex-shrink-0">{events.length} events</span>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0 ml-3">
-            {open && <span className="text-white/12 animate-twinkle text-[8px] select-none" aria-hidden>✦</span>}
-            <span className="text-[9px] text-ink-ghost">{open ? '▼' : '▲'}</span>
-          </div>
-        </button>
+        ) : (
+          <button
+            className="flex items-center justify-between px-5 h-10 flex-1 min-w-0 text-left
+                       text-xs text-ink-muted hover:text-ink-secondary transition-colors duration-100"
+            onClick={onToggle}
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="label flex-shrink-0">Live Log</span>
+              {events.length > 0 && (
+                <span className="text-[10px] text-ink-ghost font-mono flex-shrink-0">{events.length} events</span>
+              )}
+              {!open && last && (
+                <span className={`text-[10px] font-mono truncate ${lastColor}`}>
+                  {formatEvent(last).slice(8)}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+              {open && <span className="text-white/12 animate-twinkle text-[8px] select-none" aria-hidden>✦</span>}
+              <span className="text-[9px] text-ink-ghost">{open ? '▼' : '▲'}</span>
+            </div>
+          </button>
+        )}
 
-        {open && (
+        {(open || embedded) && (
           <div className="flex items-center gap-1 px-3 flex-shrink-0">
             {!follow && (
               <button
@@ -159,7 +174,7 @@ export default function LiveLog({ events, open, onToggle, onClear }: {
       </div>
 
       {/* Log content */}
-      {open && (
+      {(open || embedded) && (
         <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto log-scanlines">
           <div className="px-5 py-3 font-mono text-[11px] leading-[1.8]">
             {shown.length === 0 ? (
