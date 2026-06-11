@@ -6,9 +6,15 @@ type Handler = (event: SSEEvent) => void
 
 const RECONNECT_DELAY_MS = 3000
 
-export function useSSE(enabled: boolean, onEvent: Handler) {
+export function useSSE(
+  enabled: boolean,
+  onEvent: Handler,
+  onConnection?: (connected: boolean) => void,
+) {
   const handlerRef = useRef(onEvent)
   handlerRef.current = onEvent
+  const connRef = useRef(onConnection)
+  connRef.current = onConnection
 
   useEffect(() => {
     if (!enabled) return
@@ -24,6 +30,8 @@ export function useSSE(enabled: boolean, onEvent: Handler) {
       const backendUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
       es = new EventSource(`${backendUrl}/api/events`)
 
+      es.onopen = () => { connRef.current?.(true) }
+
       es.onmessage = (e) => {
         try {
           handlerRef.current(JSON.parse(e.data) as SSEEvent)
@@ -33,6 +41,7 @@ export function useSSE(enabled: boolean, onEvent: Handler) {
       }
 
       es.onerror = () => {
+        connRef.current?.(false)
         es?.close()
         es = null
         if (!disposed) {

@@ -79,5 +79,9 @@ export interface SSEEvent {
   // tts_progress fields
   lines_done?: number
   lines_total?: number
+  /** Live line being synthesised (truncated server-side to ~200 chars). */
+  text?: string
+  speaker?: string
+  emotion?: string
   [key: string]: unknown
 }
