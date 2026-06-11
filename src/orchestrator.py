@@ -79,6 +79,7 @@ def _truncate_live_text(text) -> str:
         return text
     return text[: _LIVE_TEXT_MAX_CHARS - 1] + "…"
 
+
 # Absolute fallback when no baseline could be captured (nvidia-smi failed at
 # snapshot time but works at barrier time — rare).
 _VRAM_FALLBACK_THRESHOLD_MB = 1000

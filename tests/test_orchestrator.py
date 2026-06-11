@@ -497,6 +497,7 @@ def test_tts_progress_event_carries_line_fields():
     assert evs, "expected tts_progress events from the fake TTS engine"
     ev = evs[0]
     assert ev["lines_done"] == 1
+    assert ev["lines_total"] == 1
     assert ev["speaker"] == "Narrator"
     assert ev["text"]    == "Test line."
     assert ev["emotion"] == "neutral"
