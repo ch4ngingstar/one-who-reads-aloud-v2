@@ -1,7 +1,7 @@
 'use client'
 import { useEffect } from 'react'
 
-export type ToastTone = 'gold' | 'crimson' | 'chrome'
+export type ToastTone = 'warn' | 'crimson' | 'chrome'
 
 export interface Toast {
   id:   number
@@ -13,13 +13,13 @@ export interface Toast {
 const AUTO_DISMISS_MS = 6000
 
 const TONE_CLASS: Record<ToastTone, string> = {
-  gold:    'spell-toast--gold',
+  warn:    'spell-toast--warn',
   crimson: 'spell-toast--crimson',
   chrome:  'spell-toast--chrome',
 }
 
 const TONE_SIGIL: Record<ToastTone, string> = {
-  gold:    '!',
+  warn:    '!',
   crimson: '✗',
   chrome:  '✓',
 }

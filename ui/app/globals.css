@@ -3,10 +3,11 @@
 @tailwind utilities;
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   BASE
+   NIGHTMARE SPELL — grayscale gothic. White is for active/live elements only;
+   crimson (#8c2731 family) is reserved for errors + destructive confirms.
 ───────────────────────────────────────────────────────────────────────────── */
 @layer base {
-  * { box-sizing: border-box; border-color: #27272A; }
+  * { box-sizing: border-box; border-color: #232323; }
 
   html {
     color-scheme: dark;
@@ -16,44 +17,41 @@
 
   body {
     background-color: #000000;
-    color: #F4F4F5;
-    font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+    background-image: radial-gradient(ellipse 75% 55% at 50% -12%, #131313 0%, #000 72%);
+    color: #c4c4c4;
+    font-family: var(--font-sans), system-ui, sans-serif;
     font-size: 13px;
-    line-height: 1.65;
-    letter-spacing: -0.01em;
+    line-height: 1.5;
   }
 
-  ::-webkit-scrollbar        { width: 3px; height: 3px; }
+  ::-webkit-scrollbar        { width: 4px; height: 4px; }
   ::-webkit-scrollbar-track  { background: transparent; }
-  ::-webkit-scrollbar-thumb  { background: #27272A; }
-  ::-webkit-scrollbar-thumb:hover { background: #3F3F46; }
+  ::-webkit-scrollbar-thumb  { background: #232323; }
+  ::-webkit-scrollbar-thumb:hover { background: #464646; }
 
-  ::selection { background: rgba(212,212,216,0.12); color: #F4F4F5; }
+  ::selection { background: rgba(255,255,255,0.14); color: #ffffff; }
 
-  /* Keyboard navigation — visible focus ring without disturbing mouse flow */
   :focus-visible {
-    outline: 1px solid rgba(212,212,216,0.45);
+    outline: 1px solid rgba(255,255,255,0.45);
     outline-offset: 2px;
   }
 
   input:not([type='range']), textarea, select {
-    background: #121212;
-    color: #F4F4F5;
-    border: none;
-    border-bottom: 1px solid #27272A;
-    border-radius: 0;
+    background: #111111;
+    color: #c4c4c4;
+    border: 1px solid #232323;
+    border-radius: 4px;
     outline: none;
-    font-family: var(--font-mono), ui-monospace, Menlo, Monaco, monospace;
+    font-family: var(--font-mono), ui-monospace, monospace;
     font-size: 12px;
     line-height: 1.5;
-    transition: background 0.15s ease, border-color 0.15s ease;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
   input:not([type='range']):focus, textarea:focus {
-    background: #121212;
-    border-bottom-color: #D4D4D8;
-    outline: none;
+    border-color: #575757;
+    box-shadow: 0 0 14px rgba(255,255,255,0.05);
   }
-  input::placeholder, textarea::placeholder { color: #3F3F46; }
+  input::placeholder, textarea::placeholder { color: #464646; }
 
   input[type='range'] {
     -webkit-appearance: none; appearance: none;
@@ -61,219 +59,220 @@
     cursor: pointer; height: 16px;
   }
   input[type='range']::-webkit-slider-runnable-track {
-    height: 1px; background: #27272A; border-radius: 0;
+    height: 2px; background: #232323; border-radius: 1px;
   }
+  /* Four-pointed ✦ thumb — the Shadow Slave mark. */
   input[type='range']::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 10px; height: 10px;
-    background: #52525B; margin-top: -4px;
-    box-shadow: none;
+    width: 12px; height: 12px;
+    background: #c4c4c4; margin-top: -5px;
+    clip-path: polygon(50% 0%, 61% 39%, 100% 50%, 61% 61%, 50% 100%, 39% 61%, 0% 50%, 39% 39%);
     transition: background 0.15s ease;
-    clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
-    border-radius: 0;
   }
   input[type='range']:focus { outline: none; }
-  input[type='range']:focus::-webkit-slider-thumb { background: #D4D4D8; }
-  .range-vol::-webkit-slider-thumb {
-    background: #52525B;
-    clip-path: none;
-    border-radius: 50%;
-  }
+  input[type='range']:focus::-webkit-slider-thumb { background: #ffffff; }
+  .range-vol::-webkit-slider-thumb { background: #575757; clip-path: none; border-radius: 50%; }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   BUTTONS
+   BUTTONS — Cinzel, 4px radius, white-glow hovers. Crimson = danger only.
 ───────────────────────────────────────────────────────────────────────────── */
 
-/* Ghost */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   padding: 7px 14px; font-size: 11px; font-weight: 500;
-  border-radius: 0; user-select: none; cursor: pointer;
-  background: transparent;
-  color: #52525B;
-  border: 1px solid #27272A;
-  letter-spacing: 0.06em;
+  font-family: var(--font-display), Cinzel, serif;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  border-radius: 4px; user-select: none; cursor: pointer;
+  background: #111111;
+  color: #c4c4c4;
+  border: 1px solid #343434;
   transition: all 0.12s ease;
 }
-.btn:hover { background: #0A0A0A; border-color: #3F3F46; color: #D4D4D8; }
+.btn:hover { border-color: #696969; color: #ffffff; box-shadow: 0 0 16px rgba(255,255,255,0.08); }
 .btn:active { transform: scale(0.97); }
-.btn:disabled { opacity: 0.22; cursor: not-allowed; }
+.btn:disabled { opacity: 0.25; cursor: not-allowed; }
 
-/* Primary CTA — Y2K Gold. The ONLY bright color on screen. */
+/* Primary — bone-white invert. The brightest thing on screen. */
 .btn-primary {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 8px 18px; font-size: 15px; font-weight: 400;
-  font-family: var(--font-tech), 'VT323', monospace;
-  letter-spacing: 0.14em; text-transform: uppercase;
-  border-radius: 0; user-select: none; cursor: pointer;
-  background: #FBBF24;
+  padding: 8px 20px; font-size: 11px; font-weight: 700;
+  font-family: var(--font-display), Cinzel, serif;
+  letter-spacing: 0.2em; text-transform: uppercase;
+  border-radius: 4px; user-select: none; cursor: pointer;
+  background: #e8e8e8;
   color: #000000;
-  border: 1px solid rgba(251,191,36,0.6);
-  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+  border: 1px solid #e8e8e8;
+  box-shadow: 0 0 24px rgba(255,255,255,0.18);
   transition: background 0.12s ease, box-shadow 0.12s ease;
 }
-.btn-primary:hover {
-  background: #FCD34D;
-  box-shadow: 0 0 24px rgba(251,191,36,0.22);
-}
+.btn-primary:hover { background: #ffffff; box-shadow: 0 0 32px rgba(255,255,255,0.28); }
 .btn-primary:active { transform: scale(0.97); }
 .btn-primary:disabled { opacity: 0.28; cursor: not-allowed; }
 
-/* Danger — Deep Crimson */
+/* Danger — the only crimson interactive. */
 .btn-danger {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   padding: 7px 14px; font-size: 11px; font-weight: 500;
-  border-radius: 0; user-select: none; cursor: pointer;
+  font-family: var(--font-display), Cinzel, serif;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  border-radius: 4px; user-select: none; cursor: pointer;
   background: transparent;
-  color: #991B1B;
-  border: 1px solid rgba(153,27,27,0.3);
-  letter-spacing: 0.06em;
+  color: #b85560;
+  border: 1px solid rgba(140,39,49,0.45);
   transition: all 0.12s ease;
 }
-.btn-danger:hover { background: rgba(153,27,27,0.08); border-color: rgba(153,27,27,0.5); color: #B91C1C; }
+.btn-danger:hover { background: #150b0c; border-color: #8c2731; color: #b85560; box-shadow: 0 0 10px rgba(140,39,49,0.3); }
 .btn-danger:active { transform: scale(0.97); }
-.btn-danger:disabled { opacity: 0.22; cursor: not-allowed; }
+.btn-danger:disabled { opacity: 0.25; cursor: not-allowed; }
 
-/* Preview / secondary — Chrome Silver */
+/* Secondary (VoiceMapper preview etc.) — same family as .btn. */
 .btn-gold {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   padding: 7px 14px; font-size: 11px; font-weight: 500;
-  border-radius: 0; user-select: none; cursor: pointer;
+  font-family: var(--font-display), Cinzel, serif;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  border-radius: 4px; user-select: none; cursor: pointer;
   background: transparent;
-  color: #52525B;
-  border: 1px solid #27272A;
-  letter-spacing: 0.06em;
+  color: #696969;
+  border: 1px solid #343434;
   transition: all 0.12s ease;
 }
-.btn-gold:hover {
-  background: #0A0A0A;
-  border-color: #52525B;
-  color: #D4D4D8;
-}
-.btn-gold:hover svg { filter: drop-shadow(0 0 4px rgba(212,212,216,0.35)); }
+.btn-gold:hover { color: #ffffff; border-color: #696969; box-shadow: 0 0 16px rgba(255,255,255,0.08); }
 .btn-gold:active { transform: scale(0.97); }
-.btn-gold:disabled { opacity: 0.22; cursor: not-allowed; }
+.btn-gold:disabled { opacity: 0.25; cursor: not-allowed; }
 
-/* Sharp filter tags */
+/* Flat text filter tabs (queue bar, log controls). */
 .btn-filter {
-  display: inline-flex; align-items: center; justify-content: center;
-  padding: 5px 11px; font-size: 13px; font-weight: 400;
-  font-family: var(--font-tech), 'VT323', monospace;
-  letter-spacing: 0.1em; text-transform: uppercase;
-  border-radius: 0; user-select: none; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  padding: 6px 13px; font-size: 10px; font-weight: 500;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  border-radius: 4px; user-select: none; cursor: pointer;
   background: transparent;
-  color: #3F3F46;
-  border: 1px solid #27272A;
+  color: #696969;
+  border: none;
   transition: all 0.12s ease;
 }
-.btn-filter:hover { border-color: #3F3F46; color: #52525B; }
+.btn-filter:hover { color: #c4c4c4; }
 .btn-filter-active {
-  background: #0A0A0A;
-  color: #F4F4F5;
-  border-color: #52525B;
+  background: #232323;
+  color: #ffffff;
+  text-shadow: 0 0 10px rgba(255,255,255,0.35);
 }
-.btn-filter-done-active {
-  background: #0A0A0A;
-  color: #D4D4D8;
-  border-color: #52525B;
-}
+.btn-filter-done-active { background: #232323; color: #e8e8e8; }
+.btn-filter--blood { color: #b85560; }
 
 /* ─────────────────────────────────────────────────────────────────────────────
    SURFACES
 ───────────────────────────────────────────────────────────────────────────── */
 
+/* Command Deck panel — queue, inspector, player shells. */
+.deck-card {
+  background: rgba(10,10,10,0.82);
+  border: 1px solid #232323;
+  border-radius: 6px;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.6);
+}
+
 .glass-card {
-  background: rgba(10,10,10,0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid #27272A;
-  border-radius: 0;
+  background: rgba(10,10,10,0.8);
+  border: 1px solid #232323;
+  border-radius: 6px;
 }
 
 .glass-panel {
-  background: rgba(0,0,0,0.98);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-bottom: 1px solid #27272A;
+  background: linear-gradient(180deg, rgba(255,255,255,0.015), transparent);
+  border-bottom: 1px solid #1c1c1c;
 }
 
+/* VoiceMapper speaker cards. */
 .memory-card {
-  background: #0A0A0A;
-  border: 1px solid #27272A;
-  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  background: #111111;
+  border: 1px solid #232323;
+  border-radius: 4px;
   transition: border-color 0.15s ease;
 }
-.memory-card:hover { border-color: #3F3F46; }
-.memory-card--ready   { border-color: rgba(212,212,216,0.22); }
-.memory-card--partial { border-color: #3F3F46; }
+.memory-card:hover { border-color: #464646; }
+.memory-card--ready   { border-color: rgba(255,255,255,0.22); }
+.memory-card--partial { border-color: #343434; }
 
 /* ─────────────────────────────────────────────────────────────────────────────
    PROGRESS & DIVIDERS
 ───────────────────────────────────────────────────────────────────────────── */
 
 .progress-track {
-  height: 2px;
-  background: #0A0A0A;
-  border-radius: 0;
+  height: 3px;
+  background: #232323;
+  border-radius: 1px;
   overflow: hidden;
+  position: relative;
 }
 .progress-fill {
-  height: 100%;
-  border-radius: 0;
+  display: block; height: 100%;
+  background: #ffffff;
+  box-shadow: 0 0 12px rgba(255,255,255,0.8);
+  border-radius: 1px;
   transition: width 0.45s ease;
+  position: relative; overflow: hidden;
+}
+/* Shimmer sweep across a live (determinate) fill. */
+.progress-fill::after {
+  content: '';
+  position: absolute; inset: 0; width: 30%;
+  background: linear-gradient(90deg, transparent, rgba(0,0,0,0.35), transparent);
+  animation: spell-shimmer 2.2s infinite;
+}
+/* Indeterminate — diarize/assemble stages have no per-line progress. */
+.progress-indeterminate::before {
+  content: '';
+  position: absolute; top: 0; bottom: 0; left: -30%; width: 30%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent);
+  animation: spell-scan 1.6s ease-in-out infinite;
+}
+@keyframes spell-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(420%); }
+}
+@keyframes spell-scan {
+  0%   { left: -30%; }
+  100% { left: 100%; }
 }
 
-/* Weaver's Thread — subtle zinc rule */
 .weaver-thread {
   height: 1px;
-  background: linear-gradient(
-    to right,
-    transparent 0%,
-    #27272A 20%,
-    #3F3F46 50%,
-    #27272A 80%,
-    transparent 100%
-  );
+  background: linear-gradient(to right,
+    transparent 0%, #232323 20%, #464646 50%, #232323 80%, transparent 100%);
+}
+
+/* Inspector live-stage halo. */
+.stage-glow {
+  background: radial-gradient(ellipse 90% 100% at 50% 0%, #1b1b1b 0%, transparent 70%);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   OVERLAYS
-───────────────────────────────────────────────────────────────────────────── */
-
-.log-scanlines { position: relative; }
-.log-scanlines::before {
-  content: '';
-  position: absolute; inset: 0;
-  background: repeating-linear-gradient(
-    0deg, transparent 0px, transparent 3px,
-    rgba(0,0,0,0.12) 3px, rgba(0,0,0,0.12) 4px
-  );
-  pointer-events: none; z-index: 1;
-}
-.log-scanlines > * { position: relative; z-index: 2; }
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   DREAM REALM — atmospheric backdrop
-   Faint vignette + cold moonlit gradient at the top edge. Pure CSS, zero
-   layout cost; sits behind everything via a fixed pseudo-element.
+   DREAM REALM — vignette + giant ghost ✦ watermark (spec §2)
 ───────────────────────────────────────────────────────────────────────────── */
 
 .dream-realm { position: relative; }
 .dream-realm::before {
+  content: '✦';
+  position: fixed; right: -60px; bottom: -90px;
+  font-size: 420px; line-height: 1;
+  color: #070707;
+  transform: rotate(12deg);
+  pointer-events: none; z-index: 0;
+}
+.dream-realm::after {
   content: '';
   position: fixed; inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  background:
-    radial-gradient(120% 60% at 50% -10%, rgba(212,212,216,0.045) 0%, transparent 55%),
-    radial-gradient(80% 90% at 50% 115%, rgba(0,0,0,0.85) 0%, transparent 60%),
-    radial-gradient(140% 140% at 50% 50%, transparent 55%, rgba(0,0,0,0.5) 100%);
+  pointer-events: none; z-index: 40;
+  background: radial-gradient(ellipse 120% 90% at 50% 50%, transparent 55%, rgba(0,0,0,0.55) 100%);
 }
 .dream-realm > * { position: relative; z-index: 1; }
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   SPELL TOASTS — Nightmare Spell notifications: [ bracketed system messages ]
+   SPELL TOASTS — [ bracketed system messages ]. z-50 keeps them above the
+   vignette layer (z-40).
 ───────────────────────────────────────────────────────────────────────────── */
 
 .spell-toast {
@@ -283,36 +282,45 @@
   background: rgba(0,0,0,0.92);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid #27272A;
+  border: 1px solid #232323;
   border-left-width: 2px;
+  border-radius: 4px;
   font-family: var(--font-mono), ui-monospace, monospace;
   font-size: 11px;
   line-height: 1.55;
-  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
 }
-.spell-toast--gold    { border-left-color: #FBBF24; color: #FBBF24; }
-.spell-toast--crimson { border-left-color: #991B1B; color: #B91C1C; }
-.spell-toast--chrome  { border-left-color: #D4D4D8; color: #D4D4D8; }
+/* Warnings are urgent-but-not-blood: bright white, breathing. */
+.spell-toast--warn    { border-left-color: #ffffff; color: #e8e8e8; animation: breathe 2.4s ease-in-out infinite; }
+.spell-toast--crimson { border-left-color: #8c2731; color: #b85560; }
+.spell-toast--chrome  { border-left-color: #c4c4c4; color: #e8e8e8; }
 .spell-toast .spell-bracket { opacity: 0.45; user-select: none; }
+@keyframes breathe {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   PLAYER / GRID HELPERS
+   LOG / PLAYER HELPERS
 ───────────────────────────────────────────────────────────────────────────── */
 
-/* Off-screen chapter cards skip layout+paint until scrolled near. */
-.cv-auto {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 190px;
+.log-scanlines { position: relative; background: #050505; }
+.log-scanlines::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(
+    0deg, transparent 0px, transparent 3px,
+    rgba(0,0,0,0.12) 3px, rgba(0,0,0,0.12) 4px);
+  pointer-events: none; z-index: 1;
 }
+.log-scanlines > * { position: relative; z-index: 2; }
 
-/* Minimap click → grid scroll lands here with a brief gold pulse. */
-.flash-highlight { animation: flash-highlight 1.6s ease-out 1; }
+.cv-auto { content-visibility: auto; contain-intrinsic-size: auto 64px; }
 
-/* Three tiny bars on the card whose audio is playing in the global player. */
-.equalizer { display: inline-flex; align-items: flex-end; gap: 2px; height: 10px; }
+.equalizer { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
 .equalizer span {
   width: 2px; height: 100%;
-  background: #D4D4D8;
+  background: #ffffff;
+  box-shadow: 0 0 6px rgba(255,255,255,0.6);
   transform-origin: bottom;
   animation: equalize 0.9s ease-in-out infinite;
 }
@@ -321,22 +329,19 @@
 .equalizer--paused span { animation-play-state: paused; opacity: 0.4; }
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   MISC
+   MISC + COMPONENT PRIMITIVES
 ───────────────────────────────────────────────────────────────────────────── */
 
 .chip {
   display: inline-flex; align-items: center;
   padding: 2px 8px; font-size: 10px; font-weight: 500;
-  border-radius: 0;
+  border-radius: 4px;
   background: transparent;
-  color: #52525B;
-  border: 1px solid #27272A;
+  color: #696969;
+  border: 1px solid #232323;
   letter-spacing: 0.07em;
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   COMPONENTS
-───────────────────────────────────────────────────────────────────────────── */
 @layer components {
   .label {
     @apply text-[10px] font-medium uppercase text-ink-muted;
@@ -347,21 +352,20 @@
   .input {
     @apply w-full px-3 py-2.5 text-xs text-ink-primary focus:outline-none;
     font-family: var(--font-mono), ui-monospace, monospace;
-    background: #121212;
+    background: #111111;
   }
 
-  .divider {
-    border-top: 1px solid #27272A;
-  }
+  .divider { border-top: 1px solid #232323; }
 
+  /* Status mark — four-pointed ✦ via clip-path (used by legacy status dots). */
   .status-dot {
-    @apply w-1.5 h-1.5 flex-shrink-0;
-    clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+    @apply w-2 h-2 flex-shrink-0;
+    clip-path: polygon(50% 0%, 61% 39%, 100% 50%, 61% 61%, 50% 100%, 39% 61%, 0% 50%, 39% 39%);
     border-radius: 0;
   }
 
   .tech {
-    font-family: var(--font-tech), 'VT323', monospace;
-    letter-spacing: 0.06em;
+    font-family: var(--font-mono), ui-monospace, monospace;
+    letter-spacing: 0.04em;
   }
 }

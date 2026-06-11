@@ -220,7 +220,7 @@ export default function Dashboard() {
       pushToast('crimson', `The Nightmare collapsed: ${String(e.error ?? 'unknown error').slice(0, 120)}`)
     }
     if (e.type === 'vram_warning') {
-      pushToast('gold', `The Spell warns: VRAM ${e.used_mb} MB exceeds the ${e.threshold_mb} MB barrier.`)
+      pushToast('warn', `The Spell warns: VRAM ${e.used_mb} MB exceeds the ${e.threshold_mb} MB barrier.`)
     }
   }, [logOpen, refreshChapters, refreshProgress, pushToast])
 
