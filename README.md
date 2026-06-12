@@ -76,7 +76,11 @@ On Windows, `deepspeed` usually fails to build — that's fine, the TTS engine r
 .\start.ps1
 ```
 
-This starts the backend (port 8000) and the UI (port 3000) in separate windows and opens the browser. From the UI: create a project from your EPUB, map characters to voice reference clips (one clean ~10 s neutral clip per character), and start the pipeline. Assembled MP3s land in `data/output/`.
+This starts the backend (port 8000) and the UI (port 3000) in separate windows and opens the browser. From the UI: create a project from your EPUB, map characters to voice reference clips (one clean ~10 s neutral clip per character — no transcript needed, IndexTTS2 clones from audio alone), and start the pipeline. Assembled MP3s land in `data/output/`.
+
+<p align="center">
+  <img src="docs/screenshots/voice-mapping.png" width="430" alt="Voice mapping panel — one reference clip per character">
+</p>
 
 Backend and frontend can also be run separately:
 

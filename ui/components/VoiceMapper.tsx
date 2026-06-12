@@ -89,7 +89,7 @@ function RefTextEditor({ speaker, initial, onSave }: {
       <button
         className="text-[10px] text-ink-ghost hover:text-ink-secondary transition-colors underline underline-offset-2 decoration-white/8"
         onClick={() => setOpen(true)}
-        title="Add transcript for better cloning quality"
+        title="Optional note — IndexTTS2 clones from audio alone and ignores transcripts"
       >
         {initial ? 'edit transcript' : '+ add transcript'}
       </button>
@@ -185,9 +185,7 @@ export default function VoiceMapper({ voices, onUpdate }: { voices: Voice[]; onU
     setNewSpeaker('')
   }
 
-  const registered     = voices.length
-  const withTranscript = voices.filter(v => v.ref_text).length
-  const allReady       = registered > 0 && withTranscript === registered
+  const registered = voices.length
 
   return (
     <div className="space-y-4">
@@ -197,19 +195,11 @@ export default function VoiceMapper({ voices, onUpdate }: { voices: Voice[]; onU
         <div className="flex-1 weaver-thread" />
       </div>
 
-      {/* Quality summary */}
+      {/* Roster summary */}
       <div className="flex items-center gap-2 text-[10px]">
         <span className="text-ink-ghost">
           <span className="tech text-sm text-ink-secondary">{registered}</span> voices
         </span>
-        {registered > 0 && (
-          <>
-            <span className="text-white/10">·</span>
-            <span className="text-ink-secondary">
-              {withTranscript}/{registered} transcripts
-            </span>
-          </>
-        )}
       </div>
 
       {error && (
