@@ -109,16 +109,6 @@ export async function uploadVoice(
   return res.json()
 }
 
-export async function updateVoiceRefText(
-  speaker: string,
-  ref_text: string,
-): Promise<{ speaker: string; ref_text: string }> {
-  return req(`/voices/${encodeURIComponent(speaker)}/ref_text`, {
-    method: 'PATCH',
-    body: JSON.stringify({ ref_text }),
-  })
-}
-
 export async function deleteVoice(speaker: string): Promise<void> {
   await req(`/voices/${encodeURIComponent(speaker)}`, { method: 'DELETE' })
 }

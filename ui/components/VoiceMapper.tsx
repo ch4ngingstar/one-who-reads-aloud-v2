@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
-import { uploadVoice, deleteVoice, updateVoiceRefText, voiceAudioUrl } from '@/lib/api'
+import { uploadVoice, deleteVoice, voiceAudioUrl } from '@/lib/api'
 import ConfirmButton from '@/components/ConfirmButton'
 import type { Voice } from '@/lib/types'
 
@@ -70,54 +70,6 @@ function EchoRune({ size = 11 }: { size?: number }) {
   )
 }
 
-// ── Inline transcript editor ──────────────────────────────────────────────────
-function RefTextEditor({ speaker, initial, onSave }: {
-  speaker: string; initial: string; onSave: (t: string) => Promise<void>
-}) {
-  const [open,   setOpen]   = useState(false)
-  const [value,  setValue]  = useState(initial)
-  const [saving, setSaving] = useState(false)
-
-  async function handleSave() {
-    setSaving(true)
-    try { await onSave(value.trim()); setOpen(false) }
-    finally { setSaving(false) }
-  }
-
-  if (!open) {
-    return (
-      <button
-        className="text-[10px] text-ink-ghost hover:text-ink-secondary transition-colors underline underline-offset-2 decoration-white/8"
-        onClick={() => setOpen(true)}
-        title="Optional note — IndexTTS2 clones from audio alone and ignores transcripts"
-      >
-        {initial ? 'edit transcript' : '+ add transcript'}
-      </button>
-    )
-  }
-
-  return (
-    <div className="mt-2 space-y-1.5 animate-slide-up">
-      <textarea
-        className="input w-full resize-none font-mono"
-        rows={2}
-        placeholder={`What ${speaker} says in the clip…`}
-        value={value}
-        onChange={e => setValue(e.target.value)}
-        autoFocus
-      />
-      <div className="flex gap-1.5">
-        <button className="btn-primary text-[10px] py-1 px-3" onClick={handleSave} disabled={saving}>
-          {saving ? '…' : 'Save'}
-        </button>
-        <button className="btn text-[10px] py-1 px-3" onClick={() => { setValue(initial); setOpen(false) }}>
-          Cancel
-        </button>
-      </div>
-    </div>
-  )
-}
-
 // ── VoiceMapper ───────────────────────────────────────────────────────────────
 export default function VoiceMapper({ voices, onUpdate }: { voices: Voice[]; onUpdate: () => void }) {
   const [uploading,     setUploading]     = useState<string | null>(null)
@@ -173,12 +125,6 @@ export default function VoiceMapper({ voices, onUpdate }: { voices: Voice[]; onU
     catch (err) { setError(err instanceof Error ? err.message : 'Delete failed') }
   }
 
-  async function handleSaveRef(speaker: string, text: string) {
-    setError(null)
-    try { await updateVoiceRefText(speaker, text); onUpdate() }
-    catch (err) { setError(err instanceof Error ? err.message : 'Save failed') }
-  }
-
   function addCustomSpeaker() {
     const name = newSpeaker.trim()
     if (name && !allSpeakers.includes(name)) setExtraSpeakers(prev => [...prev, name])
@@ -214,15 +160,13 @@ export default function VoiceMapper({ voices, onUpdate }: { voices: Voice[]; onU
       {/* Speaker rows */}
       <div className="space-y-1.5">
         {allSpeakers.map(speaker => {
-          const voice         = voiceMap[speaker]
-          const isUploading   = uploading === speaker
-          const filename      = voice?.ref_audio_path.split(/[\\/]/).pop()
-          const hasTranscript = Boolean(voice?.ref_text)
-          const complete      = voice && hasTranscript
+          const voice       = voiceMap[speaker]
+          const isUploading = uploading === speaker
+          const filename    = voice?.ref_audio_path.split(/[\\/]/).pop()
 
-          // Monochrome — chrome for ready, zinc for partial, border-only for empty
-          const leftAccent = complete ? '#D4D4D8' : voice ? '#52525B' : '#27272A'
-          const cardMod    = complete ? 'memory-card--ready' : voice ? 'memory-card--partial' : ''
+          // Monochrome — chrome for ready, border-only for empty
+          const leftAccent = voice ? '#D4D4D8' : '#27272A'
+          const cardMod    = voice ? 'memory-card--ready' : ''
 
           return (
             <div
@@ -288,15 +232,6 @@ export default function VoiceMapper({ voices, onUpdate }: { voices: Voice[]; onU
                 </div>
               </div>
 
-              {/* Transcript editor */}
-              {voice && (
-                <div className="mt-2 ml-5">
-                  <RefTextEditor speaker={speaker} initial={voice.ref_text ?? ''} onSave={t => handleSaveRef(speaker, t)} />
-                  {voice.ref_text && (
-                    <p className="text-[9px] text-ink-ghost mt-1 line-clamp-1 italic">"{voice.ref_text}"</p>
-                  )}
-                </div>
-              )}
             </div>
           )
         })}
