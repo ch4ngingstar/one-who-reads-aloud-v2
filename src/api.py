@@ -78,11 +78,6 @@ class PipelineStart(BaseModel):
 class VoiceSet(BaseModel):
     speaker:        str
     ref_audio_path: str
-    ref_text:       str = ""   # transcript of the reference clip for better voice cloning
-
-
-class VoiceRefText(BaseModel):
-    ref_text: str
 
 
 # ── Pipeline manager ──────────────────────────────────────────────────────────
@@ -453,9 +448,8 @@ async def set_voice(req: VoiceSet, sm: StateManager = Depends(get_sm)):
             status_code=400,
             detail=f"Audio file not found: {req.ref_audio_path}"
         )
-    sm.set_voice(req.speaker, req.ref_audio_path, req.ref_text)
-    return {"speaker": req.speaker, "ref_audio_path": req.ref_audio_path,
-            "ref_text": req.ref_text}
+    sm.set_voice(req.speaker, req.ref_audio_path)
+    return {"speaker": req.speaker, "ref_audio_path": req.ref_audio_path}
 
 
 _ALLOWED_VOICE_EXTS = {".wav", ".mp3", ".flac", ".ogg"}
@@ -464,11 +458,10 @@ _ALLOWED_VOICE_EXTS = {".wav", ".mp3", ".flac", ".ogg"}
 @app.post("/api/voices/upload", status_code=201)
 async def upload_voice(
     speaker:  str   = Form(...),
-    ref_text: str   = Form(""),
     file:     UploadFile = File(...),
     sm:       StateManager = Depends(get_sm),
 ):
-    """Upload a reference clip for a speaker, with optional transcript."""
+    """Upload a reference clip for a speaker."""
     speaker = speaker.strip()
     if not speaker:
         raise HTTPException(status_code=400, detail="Speaker name is required.")
@@ -494,21 +487,8 @@ async def upload_voice(
     _VOICES_DIR.mkdir(parents=True, exist_ok=True)
     dest = _VOICES_DIR / f"{slug}{ext}"
     dest.write_bytes(content)
-    sm.set_voice(speaker, str(dest), ref_text)
-    return {"speaker": speaker, "ref_audio_path": str(dest), "ref_text": ref_text}
-
-
-@app.patch("/api/voices/{speaker}/ref_text", status_code=200)
-async def update_voice_ref_text(
-    speaker: str,
-    req:     VoiceRefText,
-    sm:      StateManager = Depends(get_sm),
-):
-    """Update only the reference transcript for a voice (no file re-upload needed)."""
-    found = sm.update_voice_ref_text(speaker, req.ref_text)
-    if not found:
-        raise HTTPException(status_code=404, detail=f"Voice '{speaker}' not found.")
-    return {"speaker": speaker, "ref_text": req.ref_text}
+    sm.set_voice(speaker, str(dest))
+    return {"speaker": speaker, "ref_audio_path": str(dest)}
 
 
 @app.delete("/api/voices/{speaker}")

@@ -102,7 +102,6 @@ CREATE TABLE IF NOT EXISTS voices (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     speaker       TEXT    NOT NULL UNIQUE,
     ref_audio_path TEXT   NOT NULL,
-    ref_text      TEXT    NOT NULL DEFAULT '',
     created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
     updated_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
@@ -161,13 +160,14 @@ class StateManager:
             conn.executescript(_SCHEMA)
             for sql in [
                 "ALTER TABLE chapters ADD COLUMN output_file_size_bytes INTEGER",
-                "ALTER TABLE voices ADD COLUMN ref_text TEXT NOT NULL DEFAULT ''",
                 "ALTER TABLE chapters ADD COLUMN processing_seconds REAL",
+                # ref_text was only needed by Fish Speech; IndexTTS2 ignores it.
+                "ALTER TABLE voices DROP COLUMN ref_text",
             ]:
                 try:
                     conn.execute(sql)
                 except sqlite3.OperationalError:
-                    pass  # column already exists
+                    pass  # column already exists / already dropped
 
     # ── Project seeding ───────────────────────────────────────────────────────
 
@@ -418,27 +418,17 @@ class StateManager:
 
     # ── Voice mapping ─────────────────────────────────────────────────────────
 
-    def set_voice(self, speaker: str, ref_audio_path: str, ref_text: str = "") -> None:
-        """Upsert a speaker -> reference audio mapping with optional transcript."""
+    def set_voice(self, speaker: str, ref_audio_path: str) -> None:
+        """Upsert a speaker -> reference audio mapping."""
         with self._conn() as conn:
             conn.execute(
-                """INSERT INTO voices (speaker, ref_audio_path, ref_text, updated_at)
-                   VALUES (?, ?, ?, ?)
+                """INSERT INTO voices (speaker, ref_audio_path, updated_at)
+                   VALUES (?, ?, ?)
                    ON CONFLICT(speaker) DO UPDATE SET
                      ref_audio_path=excluded.ref_audio_path,
-                     ref_text=excluded.ref_text,
                      updated_at=excluded.updated_at""",
-                (speaker, ref_audio_path, ref_text, _now()),
+                (speaker, ref_audio_path, _now()),
             )
-
-    def update_voice_ref_text(self, speaker: str, ref_text: str) -> bool:
-        """Update only the transcript for an existing voice. Returns True if found."""
-        with self._conn() as conn:
-            cur = conn.execute(
-                "UPDATE voices SET ref_text=?, updated_at=? WHERE speaker=?",
-                (ref_text, _now(), speaker),
-            )
-            return cur.rowcount > 0
 
     def delete_voice(self, speaker: str) -> bool:
         """Remove a voice mapping. Returns True if found and deleted, False if not found."""
@@ -447,13 +437,13 @@ class StateManager:
             return cur.rowcount > 0
 
     def get_voice_map(self) -> dict:
-        """Returns { speaker: {"path": str, "ref_text": str} }. Read by Module 4 (TTS Engine)."""
+        """Returns { speaker: {"path": str} }. Read by Module 4 (TTS Engine)."""
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT speaker, ref_audio_path, ref_text FROM voices"
+                "SELECT speaker, ref_audio_path FROM voices"
             ).fetchall()
             return {
-                r["speaker"]: {"path": r["ref_audio_path"], "ref_text": r["ref_text"] or ""}
+                r["speaker"]: {"path": r["ref_audio_path"]}
                 for r in rows
             }
 
@@ -461,7 +451,8 @@ class StateManager:
         """Returns full voice rows for the UI."""
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT * FROM voices ORDER BY speaker"
+                "SELECT id, speaker, ref_audio_path, created_at, updated_at "
+                "FROM voices ORDER BY speaker"
             ).fetchall()
             return [dict(r) for r in rows]
 

@@ -24,7 +24,7 @@ from tts_engine import (
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _mock_synth(text, ref, ref_text="", emo_vector=None, emo_alpha=0.0):
+def _mock_synth(text, ref, emo_vector=None, emo_alpha=0.0):
     """Drop-in replacement for TTSEngine._synthesize that returns silent WAV."""
     return _wav_silence()
 
@@ -113,7 +113,7 @@ def test_synthesize_receives_emotion_vector():
     ])
 
     captured = []
-    def capture(text, ref, ref_text="", emo_vector=None, emo_alpha=0.0):
+    def capture(text, ref, emo_vector=None, emo_alpha=0.0):
         captured.append({"emo_vector": emo_vector, "emo_alpha": emo_alpha})
         return _wav_silence()
 
@@ -143,7 +143,7 @@ def test_emo_alpha_scale_applied():
     ])
 
     captured = []
-    def capture(text, ref, ref_text="", emo_vector=None, emo_alpha=0.0):
+    def capture(text, ref, emo_vector=None, emo_alpha=0.0):
         captured.append(emo_alpha)
         return _wav_silence()
 
@@ -165,7 +165,7 @@ def test_emo_alpha_scale_applied():
 def test_resolve_ref_audio_primary():
     voice_map = {"Sunny": "/voices/sunny.wav", "Narrator": "/voices/narrator.wav"}
     result = TTSEngine._resolve_ref_audio("Sunny", "neutral", voice_map)
-    assert result == ("/voices/sunny.wav", ""), f"Got: {result}"
+    assert result == "/voices/sunny.wav", f"Got: {result}"
     print("  PASS test_resolve_ref_audio_primary")
 
 
@@ -176,14 +176,14 @@ def test_resolve_ref_audio_emotion_override():
         "Sunny_whispers": "/voices/sunny_quiet.wav",
     }
     result = TTSEngine._resolve_ref_audio("Sunny", "whispers", voice_map)
-    assert result == ("/voices/sunny_quiet.wav", ""), f"Got: {result}"
+    assert result == "/voices/sunny_quiet.wav", f"Got: {result}"
     print("  PASS test_resolve_ref_audio_emotion_override")
 
 
 def test_resolve_ref_audio_falls_back_to_primary():
     voice_map = {"Sunny": "/voices/sunny.wav"}
     result = TTSEngine._resolve_ref_audio("Sunny", "angry", voice_map)
-    assert result == ("/voices/sunny.wav", ""), f"Got: {result}"
+    assert result == "/voices/sunny.wav", f"Got: {result}"
     print("  PASS test_resolve_ref_audio_falls_back_to_primary")
 
 
@@ -196,15 +196,15 @@ def test_resolve_ref_audio_missing_returns_none():
 def test_resolve_ref_audio_falls_back_to_default():
     voice_map = {"_default": "/voices/default.wav"}
     result = TTSEngine._resolve_ref_audio("UnknownChar", "neutral", voice_map)
-    assert result == ("/voices/default.wav", ""), f"Got: {result}"
+    assert result == "/voices/default.wav", f"Got: {result}"
     print("  PASS test_resolve_ref_audio_falls_back_to_default")
 
 
 def test_resolve_ref_audio_dict_entry():
-    # voice_map values are {"path":..,"ref_text":..} from StateManager.
-    voice_map = {"Sunny": {"path": "/voices/sunny.wav", "ref_text": "Hello."}}
+    # voice_map values are {"path":..} from StateManager.
+    voice_map = {"Sunny": {"path": "/voices/sunny.wav"}}
     result = TTSEngine._resolve_ref_audio("Sunny", "neutral", voice_map)
-    assert result == ("/voices/sunny.wav", "Hello."), f"Got: {result}"
+    assert result == "/voices/sunny.wav", f"Got: {result}"
     print("  PASS test_resolve_ref_audio_dict_entry")
 
 
@@ -318,7 +318,7 @@ def test_process_chapter_retries_on_failure():
     ])
 
     call_count = [0]
-    def flaky_synth(text, ref, ref_text="", emo_vector=None, emo_alpha=0.0):
+    def flaky_synth(text, ref, emo_vector=None, emo_alpha=0.0):
         call_count[0] += 1
         if call_count[0] < 2:
             raise RuntimeError("Generation glitch")
@@ -343,7 +343,7 @@ def test_process_chapter_marks_failed_after_all_retries():
         {"line_index": 0, "speaker": "Narrator", "text": "Always fails.", "emotion": "neutral"},
     ])
 
-    def always_fail(text, ref, ref_text="", emo_vector=None, emo_alpha=0.0):
+    def always_fail(text, ref, emo_vector=None, emo_alpha=0.0):
         raise RuntimeError("VRAM OOM")
 
     with tempfile.TemporaryDirectory() as out_dir:
@@ -410,7 +410,7 @@ def test_emotion_override_voice_used():
     ])
 
     used_refs = []
-    def capture_synth(text, ref, ref_text="", emo_vector=None, emo_alpha=0.0):
+    def capture_synth(text, ref, emo_vector=None, emo_alpha=0.0):
         used_refs.append(ref)
         return _wav_silence()
 
@@ -516,7 +516,7 @@ def test_process_chapter_splits_long_line():
     ])
 
     call_count = [0]
-    def counting_synth(text, ref, ref_text="", emo_vector=None, emo_alpha=0.0):
+    def counting_synth(text, ref, emo_vector=None, emo_alpha=0.0):
         call_count[0] += 1
         return _wav_silence(duration_ms=50)
 
@@ -564,7 +564,7 @@ def test_progress_callback_receives_line():
         {"line_index": 0, "speaker": "Sunny",    "text": "Hello there.", "emotion": "calm"},
         {"line_index": 1, "speaker": "Narrator", "text": "He waited.",   "emotion": "neutral"},
     ])
-    sm.set_voice("_default", str(_tmp_wav()), "ref text")
+    sm.set_voice("_default", str(_tmp_wav()))
     out = Path(tempfile.mkdtemp())
     engine = _make_engine(sm, out, mock_synth=_mock_synth)
 

@@ -217,7 +217,7 @@ def test_voice_audio_serves_clip():
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
         wav_path = _make_tiny_wav(Path(f.name))
 
-    sm.set_voice("Sunny", str(wav_path), "ref text")
+    sm.set_voice("Sunny", str(wav_path))
     r = client.get("/api/voices/Sunny/audio")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("audio/wav")
@@ -238,7 +238,7 @@ def test_voice_audio_missing_file():
 
     # Register a voice whose clip has since vanished from disk. set_voice does
     # not validate existence, so this models a stale DB row.
-    sm.set_voice("Ghost", r"C:\does\not\exist\ghost.wav", "")
+    sm.set_voice("Ghost", r"C:\does\not\exist\ghost.wav")
     r = client.get("/api/voices/Ghost/audio")
     assert r.status_code == 404
     print("  PASS test_voice_audio_missing_file")

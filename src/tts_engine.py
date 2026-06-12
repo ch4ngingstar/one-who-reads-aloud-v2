@@ -38,7 +38,7 @@ VRAM LIFECYCLE (Hardware Enforcer):
 INPUT  (from Module 2 StateManager):
   sm.get_pending_tts_lines(chapter_id)
   -> [{ "id": int, "line_index": int, "speaker": str, "text": str, "emotion": str }]
-  sm.get_voice_map()  -> { "Speaker": {"path": str, "ref_text": str}, ... }
+  sm.get_voice_map()  -> { "Speaker": {"path": str}, ... }
 
 OUTPUT (to Module 2 StateManager):
   sm.mark_line_tts_done(line_id, audio_path)
@@ -444,10 +444,10 @@ class TTSEngine:
         for processed, line in enumerate(lines, start=1):
             audio_path = ch_dir / f"line_{line['line_index']:04d}.wav"
 
-            ref_info = self._resolve_ref_audio(
+            ref_path = self._resolve_ref_audio(
                 line["speaker"], line["emotion"], voice_map
             )
-            if ref_info is None:
+            if ref_path is None:
                 self.sm.mark_line_failed(
                     line["id"],
                     f"No reference audio for speaker '{line['speaker']}'. "
@@ -458,8 +458,6 @@ class TTSEngine:
                 if progress_callback:
                     progress_callback(processed, total, line)
                 continue
-
-            ref_path, ref_text = ref_info
 
             # Note when the line landed on the _default voice (uses the same
             # alias normalisation as _resolve_ref_audio so the flag is accurate).
@@ -486,11 +484,11 @@ class TTSEngine:
                 try:
                     if len(segments) == 1:
                         wav_bytes = self._synthesize(
-                            segments[0], ref_path, ref_text, emo_vector, emo_alpha
+                            segments[0], ref_path, emo_vector, emo_alpha
                         )
                     else:
                         parts = [
-                            self._synthesize(seg, ref_path, ref_text, emo_vector, emo_alpha)
+                            self._synthesize(seg, ref_path, emo_vector, emo_alpha)
                             for seg in segments
                         ]
                         wav_bytes = self._concat_wavs(parts)
@@ -594,9 +592,9 @@ class TTSEngine:
         speaker: str,
         emotion: str,
         voice_map: dict,
-    ) -> "tuple[str, str] | None":
+    ) -> "str | None":
         """
-        Resolve (ref_audio_path, ref_text) for a speaker + emotion.
+        Resolve the ref_audio_path for a speaker + emotion.
 
         Resolution order:
           1. Normalise raw speaker string (strip + Title Case).
@@ -606,10 +604,10 @@ class TTSEngine:
           5. Try "_default" in voice_map (prints a warning for tracking).
           6. Return None only if _default is also absent.
         """
-        def _extract(entry) -> "tuple[str, str]":
+        def _extract(entry) -> str:
             if isinstance(entry, dict):
-                return entry["path"], entry.get("ref_text", "")
-            return entry, ""  # backward compat if old string format
+                return entry["path"]
+            return entry  # backward compat if old string format
 
         normalised = speaker.strip().title()
         canonical = SPEAKER_ALIASES.get(normalised, normalised)
@@ -643,7 +641,6 @@ class TTSEngine:
         self,
         text: str,
         ref_audio_path: str,
-        ref_text: str = "",
         emo_vector: "list[float] | None" = None,
         emo_alpha: float = 0.0,
     ) -> bytes:
@@ -652,8 +649,6 @@ class TTSEngine:
         Separated so tests can monkeypatch without a loaded model.
 
         ref_audio_path : the speaker timbre clip (spk_audio_prompt).
-        ref_text       : kept for interface compatibility; IndexTTS2 does not need
-                         a reference transcript (unlike Fish V1.5).
         emo_vector     : 8-dim emotion vector, or None for pure timbre.
         emo_alpha      : emotion blend strength (0..1).
         """

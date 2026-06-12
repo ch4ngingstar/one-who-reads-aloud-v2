@@ -48,7 +48,6 @@ export interface Voice {
   id: number
   speaker: string
   ref_audio_path: string
-  ref_text: string
   updated_at: string
 }
 

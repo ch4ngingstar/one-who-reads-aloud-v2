@@ -81,26 +81,13 @@ export async function getVoices(): Promise<{ voices: Voice[] }> {
   return req('/voices')
 }
 
-export async function setVoicePath(
-  speaker: string,
-  ref_audio_path: string,
-  ref_text = '',
-): Promise<Voice> {
-  return req('/voices', {
-    method: 'POST',
-    body: JSON.stringify({ speaker, ref_audio_path, ref_text }),
-  })
-}
-
 export async function uploadVoice(
   speaker: string,
   file: File,
-  ref_text = '',
 ): Promise<Voice> {
   const form = new FormData()
   form.append('speaker', speaker)
   form.append('file', file)
-  form.append('ref_text', ref_text)
   const res = await fetch(`${BASE}/voices/upload`, { method: 'POST', body: form })
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
