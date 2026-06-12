@@ -43,6 +43,7 @@ logs/
 
 # ─── Screenshots & scratch images (root-level captures) ───
 *.png
+!docs/screenshots/*.png
 
 # ─── OS / editor ──────────────────────────────────────────
 .DS_Store
