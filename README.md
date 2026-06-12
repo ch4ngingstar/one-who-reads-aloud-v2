@@ -1,4 +1,14 @@
-# One Who Reads Aloud
+<h1 align="center">One Who Reads Aloud</h1>
+
+<p align="center"><em>Turns the Shadow Slave web novel into a multi-voice audiobook — every character cloned, every line acted.</em></p>
+
+<p align="center">
+  <img alt="license: MIT" src="https://img.shields.io/badge/license-MIT-3a3a3a?style=flat-square">
+  <img alt="python 3.11" src="https://img.shields.io/badge/python-3.11-3a3a3a?style=flat-square">
+  <img alt="Next.js 15" src="https://img.shields.io/badge/next.js-15-3a3a3a?style=flat-square">
+  <img alt="TTS: IndexTTS2" src="https://img.shields.io/badge/tts-IndexTTS2-3a3a3a?style=flat-square">
+  <img alt="100% local" src="https://img.shields.io/badge/runs-100%25_local-3a3a3a?style=flat-square">
+</p>
 
 A local pipeline that turns the *Shadow Slave* web novel into a multi-voice audiobook. Feed it an EPUB and it produces chapter MP3s where every character speaks in their own cloned voice, and every line is delivered with an emotion chosen by an LLM. The whole thing runs on a single consumer GPU — no APIs, no cloud, nothing leaves your machine.
 
@@ -8,11 +18,14 @@ A local pipeline that turns the *Shadow Slave* web novel into a multi-voice audi
 
 Each chapter moves through four stages, orchestrated by a FastAPI backend and monitored live from a Next.js UI over SSE:
 
-```
-EPUB ──> parse ──> diarize ──> synthesize ──> assemble ──> ch_XXXX.mp3
-         (M1)      (M3, LLM)   (M4, TTS)      (M5, FFmpeg)
-                        │            │
-                        └── SQLite (M2) ── single source of truth
+```mermaid
+flowchart LR
+    epub([EPUB]) --> parse["parse<br/>M1"] --> diarize["diarize<br/>M3 · LLM"] --> tts["synthesize<br/>M4 · TTS"] --> asm["assemble<br/>M5 · FFmpeg"] --> mp3([ch_XXXX.mp3])
+    db[("SQLite (M2)<br/>single source of truth")]
+    parse -.-> db
+    diarize -.-> db
+    tts -.-> db
+    asm -.-> db
 ```
 
 1. **Parse** — chapters are extracted from the EPUB and seeded into SQLite.
