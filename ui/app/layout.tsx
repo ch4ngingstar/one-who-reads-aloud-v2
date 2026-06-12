@@ -24,8 +24,8 @@ const cinzel = Cinzel({
 })
 
 export const metadata: Metadata = {
-  title: 'Shadow Slave — Audiobook Pipeline',
-  description: 'Shadow Slave — multi-voice audiobook generation',
+  title: 'One Who Reads Aloud — Shadow Slave Audiobook',
+  description: 'Multi-voice audiobook generation for Shadow Slave',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

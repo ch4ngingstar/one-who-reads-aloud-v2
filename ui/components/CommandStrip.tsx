@@ -61,7 +61,7 @@ export default function CommandStrip({
       <div className="select-none">
         <h1 className="font-display font-bold text-[21px] leading-none tracking-[6px] text-ink-primary
                        animate-flicker [text-shadow:0_0_18px_rgba(255,255,255,0.22),0_0_60px_rgba(255,255,255,0.08)]">
-          NIGHTMARE SPELL
+          ONE WHO READS ALOUD
         </h1>
         <span className="block mt-1 text-[9px] tracking-[3.5px] uppercase text-spell-g5">
           Shadow Slave · Audiobook Forge
