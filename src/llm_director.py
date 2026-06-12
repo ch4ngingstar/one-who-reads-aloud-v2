@@ -124,8 +124,11 @@ A3 Only roster names are allowed. Guards, strangers, crowd members, servants, or
 A4 [P] segments are Narrator. ONE exception: a [P] segment that is clearly Sunny's direct
    inner thought, phrased in first person ("Why me?", "I have to run.") may be labeled Sunny.
    Third-person prose about Sunny ("Sunny walked...", "He sighed...") is ALWAYS Narrator.
-A5 [S] segments are The Nightmare Spell, unless the bracket is a mere stat or item readout
-   that the narrator would read ([1591/6000]) -- then Narrator.
+A5 [S] segments: Nightmare Spell notifications ("You have slain...", "Your shadow grows
+   stronger...") -> The Nightmare Spell. But brackets are ALSO used for telepathic rune
+   messages between characters -- if the surrounding prose shows a character sending or
+   answering ("Cassie's voice sounded in her mind: [...]"), label the SENDER instead.
+   A mere stat or item readout the narrator would read ([1591/6000]) -> Narrator.
 A6 [T] segments belong to whoever the scene follows. The thought may mention other people
    in third person ("She has been gone a month...") -- it is still the POV character's
    thought, NOT Narrator and NOT the person mentioned.
@@ -485,7 +488,10 @@ class LLMDirector:
                 if speaker not in self._allowed or speaker == SYSTEM_SPEAKER:
                     speaker = "Sunny"
             elif kind == KIND_SYSTEM:
-                if speaker != "Narrator":
+                # Brackets carry Spell notifications AND telepathic rune messages
+                # between characters -- keep any valid roster label, default to
+                # the Spell only when the label is impossible.
+                if speaker not in self._allowed:
                     speaker = SYSTEM_SPEAKER
             else:  # dialogue
                 if speaker not in self._allowed or speaker == "Narrator":

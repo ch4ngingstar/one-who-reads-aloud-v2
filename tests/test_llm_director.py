@@ -275,13 +275,22 @@ def test_prose_keeps_llm_emotion():
     print("  PASS test_prose_keeps_llm_emotion")
 
 
-def test_system_segment_forced_to_nightmare_spell():
+def test_system_segment_invalid_label_forced_to_nightmare_spell():
     sm = _tmp_sm()
     director = _make_director(sm, mock_fn=lambda t, temperature=0.2: _labels_json(
-        (0, "Sunny", "cold")))
+        (0, "NotARealCharacter", "cold")))
     lines = director._process_chunk("[You have slain a Great Demon.]", 0)
     assert lines[0]["speaker"] == SYSTEM_SPEAKER
-    print("  PASS test_system_segment_forced_to_nightmare_spell")
+    print("  PASS test_system_segment_invalid_label_forced_to_nightmare_spell")
+
+
+def test_system_segment_telepathy_keeps_character_label():
+    sm = _tmp_sm()
+    director = _make_director(sm, mock_fn=lambda t, temperature=0.2: _labels_json(
+        (0, "Cassie", "neutral")))
+    lines = director._process_chunk("[I don't sense anyone else. There is nobody there...]", 0)
+    assert lines[0]["speaker"] == "Cassie", "bracketed telepathy keeps the sender's label"
+    print("  PASS test_system_segment_telepathy_keeps_character_label")
 
 
 def test_system_segment_narrator_override_allowed():
@@ -493,7 +502,8 @@ TESTS = [
     test_prose_third_person_sunny_flipped_to_narrator,
     test_prose_other_speaker_flipped_to_narrator,
     test_prose_keeps_llm_emotion,
-    test_system_segment_forced_to_nightmare_spell,
+    test_system_segment_invalid_label_forced_to_nightmare_spell,
+    test_system_segment_telepathy_keeps_character_label,
     test_system_segment_narrator_override_allowed,
     test_thought_keeps_pov_character_label,
     test_thought_impossible_label_repaired_to_sunny,
