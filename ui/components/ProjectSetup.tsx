@@ -101,7 +101,7 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
       <Field label="LLM Model" hint=".gguf">
         <input
           className="input"
-          placeholder="models/qwen2.5-14b-instruct-q4_k_m-00001-of-00003.gguf"
+          placeholder="models/Qwen3-14B-Q4_K_M.gguf"
           value={llmPath}
           onChange={e => setLlmPath(e.target.value)}
           required

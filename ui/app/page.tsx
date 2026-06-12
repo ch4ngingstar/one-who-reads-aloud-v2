@@ -33,7 +33,7 @@ export default function CommandDeck() {
   const [sideTab,    setSideTab]    = useState<SideTab>('forge')
   const [selectedId, setSelectedId] = useState<number | null>(null)
 
-  const [llmPath,      setLlmPath]      = useState('C:/Users/alityan/OneDrive/Desktop/shaodw salve/models/qwen2.5-14b-instruct-q4_k_m-00001-of-00003.gguf')
+  const [llmPath,      setLlmPath]      = useState('C:/Users/alityan/OneDrive/Desktop/shaodw salve/models/Qwen3-14B-Q4_K_M.gguf')
   const [ttsDir,       setTtsDir]       = useState('C:/Users/alityan/OneDrive/Desktop/shaodw salve/index-tts/checkpoints')
   const [epubPath,     setEpubPath]     = useState('')
   const [speakers,     setSpeakers]     = useState('Sunny, Nephis, Cassie, Effie, Kai')
