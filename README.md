@@ -15,8 +15,7 @@
 
 A local pipeline that turns the *Shadow Slave* web novel into a multi-voice audiobook. Feed it an EPUB and it produces chapter MP3s where every character speaks in their own cloned voice, and every line is delivered with an emotion chosen by an LLM. The whole thing runs on a single consumer GPU — no APIs, no cloud, nothing leaves your machine.
 
-<!-- TODO: replace with a screen-recorded GIF (ScreenToGif / OBS → Gifski) showing a live chapter run -->
-![Command Deck UI mid-run](docs/screenshots/command-deck.png)
+![UI demo — Command Deck, live run, inspector panel](docs/screenshots/demo.gif)
 
 <details>
 <summary>More screenshots</summary>
