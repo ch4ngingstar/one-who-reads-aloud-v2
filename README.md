@@ -15,7 +15,7 @@
 
 A local pipeline that turns the *Shadow Slave* web novel into a multi-voice audiobook. Feed it an EPUB and it produces chapter MP3s where every character speaks in their own cloned voice, and every line is delivered with an emotion chosen by an LLM. The whole thing runs on a single consumer GPU — no APIs, no cloud, nothing leaves your machine.
 
-![UI demo — Command Deck, live run, inspector panel](docs/screenshots/demo.gif)
+![UI demo — Command Deck · live pipeline run · per-line inspector](docs/screenshots/demo.gif)
 
 <details>
 <summary>More screenshots</summary>
@@ -24,9 +24,9 @@ A local pipeline that turns the *Shadow Slave* web novel into a multi-voice audi
 
 ![Live run](docs/screenshots/live-run.png)
 
-**Inspector panel** — per-line diarization output (speaker + emotion) seeded before synthesis:
+**Inspector panel** — every line labelled with speaker and emotion by the LLM, colour-coded and scrollable before synthesis begins:
 
-![Inspector seeded](docs/screenshots/live-inspector-seeded.png)
+![Inspector — per-line speaker and emotion](docs/screenshots/live-inspector-seeded.png)
 
 </details>
 
