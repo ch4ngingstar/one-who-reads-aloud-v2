@@ -45,14 +45,18 @@ SLIDES = [
     (
         "docs/screenshots/live-run.png",
         "Live run — chapter progress over SSE",
-        # Trim browser chrome (top ~9%) and show just the app content
-        (0.0, 0.09, 1.0, 0.72),
+        # Strip project-name header (top 5%).  Crop to left 52% (chapter list
+        # column only) so load_slide scales it up to fill CONTENT_W — otherwise
+        # this 1278-px-wide screenshot appears noticeably smaller than the
+        # 1720-px-wide ones.
+        (0.0, 0.05, 0.52, 0.80),
     ),
     (
         "docs/screenshots/live-inspector-seeded.png",
         "Inspector — per-line speaker & emotion",
-        # Same browser chrome trim; inspector panel is fully visible in top 65%
-        (0.0, 0.04, 1.0, 0.70),
+        # Raw app screenshot — no chrome to trim.  load_slide auto-scales and
+        # crops to MAX_CONTENT_H, showing header + tabs + inspector content.
+        None,
     ),
 ]
 
