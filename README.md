@@ -3,6 +3,9 @@
 <p align="center"><em>Turns the Shadow Slave web novel into a multi-voice audiobook — every character cloned, every line acted.</em></p>
 
 <p align="center">
+  <a href="https://github.com/ch4ngingstar/one-who-reads-aloud-v2/actions/workflows/ci.yml">
+    <img alt="CI" src="https://github.com/ch4ngingstar/one-who-reads-aloud-v2/actions/workflows/ci.yml/badge.svg">
+  </a>
   <img alt="license: MIT" src="https://img.shields.io/badge/license-MIT-3a3a3a?style=flat-square">
   <img alt="python 3.11" src="https://img.shields.io/badge/python-3.11-3a3a3a?style=flat-square">
   <img alt="Next.js 15" src="https://img.shields.io/badge/next.js-15-3a3a3a?style=flat-square">
@@ -12,7 +15,21 @@
 
 A local pipeline that turns the *Shadow Slave* web novel into a multi-voice audiobook. Feed it an EPUB and it produces chapter MP3s where every character speaks in their own cloned voice, and every line is delivered with an emotion chosen by an LLM. The whole thing runs on a single consumer GPU — no APIs, no cloud, nothing leaves your machine.
 
+<!-- TODO: replace with a screen-recorded GIF (ScreenToGif / OBS → Gifski) showing a live chapter run -->
 ![Command Deck UI mid-run](docs/screenshots/command-deck.png)
+
+<details>
+<summary>More screenshots</summary>
+
+**Live pipeline run** — chapter progress, VRAM transitions, per-line TTS log:
+
+![Live run](docs/screenshots/live-run.png)
+
+**Inspector panel** — per-line diarization output (speaker + emotion) seeded before synthesis:
+
+![Inspector seeded](docs/screenshots/live-inspector-seeded.png)
+
+</details>
 
 ## How it works
 
@@ -90,13 +107,11 @@ cd ui;  npm run dev
 Nothing in the test suite needs a GPU — the LLM call and the synthesizer are monkeypatched.
 
 ```powershell
-python tests/test_llm_director.py
-python tests/test_epub_parser.py
-python tests/test_api.py
+# All Python tests at once
+pytest
 
-cd ui
-npm test
-npm run typecheck
+# Frontend
+cd ui && npm test && npm run typecheck
 ```
 
 ## A note on the content
