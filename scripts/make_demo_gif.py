@@ -45,11 +45,8 @@ SLIDES = [
     (
         "docs/screenshots/live-run.png",
         "Live run — chapter progress over SSE",
-        # Strip project-name header (top 5%).  Crop to left 52% (chapter list
-        # column only) so load_slide scales it up to fill CONTENT_W — otherwise
-        # this 1278-px-wide screenshot appears noticeably smaller than the
-        # 1720-px-wide ones.
-        (0.0, 0.05, 0.52, 0.80),
+        # Screenshot is 1720×980 — same as the others.  No crop needed.
+        None,
     ),
     (
         "docs/screenshots/live-inspector-seeded.png",
