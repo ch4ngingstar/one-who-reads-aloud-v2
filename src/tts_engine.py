@@ -391,6 +391,12 @@ class TTSEngine:
                 f"IndexTTS2 config not found: {cfg_path}. "
                 "Point model_dir at the checkpoints dir containing config.yaml."
             )
+        # Tell HuggingFace to use the local cache only — no network checks.
+        # infer_v2 calls hf_hub_download / from_pretrained for w2v-bert-2.0,
+        # amphion/MaskGCT, and funasr/campplus; these succeed from cache but
+        # fail silently on first-time use without internet.
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
         try:
             from indextts.infer_v2 import IndexTTS2
         except ImportError as e:
