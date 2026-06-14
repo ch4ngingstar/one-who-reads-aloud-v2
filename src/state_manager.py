@@ -254,6 +254,38 @@ class StateManager:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def list_projects_with_progress(self) -> list:
+        """All projects with embedded progress dict — one connection, two queries."""
+        with self._conn() as conn:
+            projects = [dict(r) for r in conn.execute(
+                "SELECT * FROM projects ORDER BY created_at DESC"
+            ).fetchall()]
+
+            agg_rows = conn.execute(
+                """SELECT project_id, status, COUNT(*) AS cnt
+                   FROM chapters GROUP BY project_id, status"""
+            ).fetchall()
+
+        counts: dict[int, dict[str, int]] = {}
+        for r in agg_rows:
+            counts.setdefault(r["project_id"], {})[r["status"]] = r["cnt"]
+
+        for p in projects:
+            c = counts.get(p["id"], {})
+            total    = sum(c.values())
+            complete = c.get("complete", 0)
+            p["progress"] = {
+                "total":     total,
+                "pending":   c.get("pending",   0),
+                "diarized":  c.get("diarized",  0),
+                "tts_done":  c.get("tts_done",  0),
+                "assembled": c.get("assembled", 0),
+                "complete":  complete,
+                "error":     c.get("error",     0),
+                "pct_complete": round(complete / total * 100, 1) if total else 0.0,
+            }
+        return projects
+
     def get_all_chapters(self, project_id: int) -> list:
         with self._conn() as conn:
             rows = conn.execute(
@@ -263,6 +295,13 @@ class StateManager:
                 (project_id,),
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def get_chapter_by_id(self, chapter_id: int) -> "dict | None":
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM chapters WHERE id = ?", (chapter_id,)
+            ).fetchone()
+            return dict(row) if row else None
 
     def get_chapters_by_status(self, project_id: int, status: str) -> list:
         with self._conn() as conn:
@@ -407,6 +446,19 @@ class StateManager:
             conn.execute(
                 """UPDATE lines SET status='tts_done', audio_path=? WHERE id=?""",
                 (audio_path, line_id),
+            )
+
+    def mark_lines_tts_done(self, updates: "list[tuple[int, str]]") -> None:
+        """Batch update multiple lines to tts_done in one connection.
+
+        updates: [(line_id, audio_path), ...]
+        """
+        if not updates:
+            return
+        with self._conn() as conn:
+            conn.executemany(
+                "UPDATE lines SET status='tts_done', audio_path=? WHERE id=?",
+                [(path, line_id) for line_id, path in updates],
             )
 
     def mark_line_failed(self, line_id: int, error: str) -> None:

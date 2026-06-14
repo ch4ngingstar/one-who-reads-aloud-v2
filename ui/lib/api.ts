@@ -1,4 +1,4 @@
-import type { Chapter, Progress, Project, PipelineStatusResponse, Voice } from './types'
+import type { Chapter, Line, Progress, Project, PipelineStatusResponse, Voice } from './types'
 
 const BASE = '/api'
 
@@ -43,6 +43,12 @@ export async function getChapters(
   projectId: number,
 ): Promise<{ chapters: Chapter[]; total: number }> {
   return req(`/chapters/${projectId}`)
+}
+
+export async function getLines(
+  chapterId: number,
+): Promise<{ lines: Line[]; total: number }> {
+  return req(`/chapters/${chapterId}/lines`)
 }
 
 // ── Pipeline ──────────────────────────────────────────────────────────────────
@@ -118,4 +124,12 @@ export async function deleteChapterAudio(
 
 export async function resetChapter(chapterId: number): Promise<{ reset: number }> {
   return req(`/chapters/${chapterId}/reset`, { method: 'POST' })
+}
+
+export async function resetChapters(params: {
+  project_id: number
+  status_filter?: string[] | null
+  chapter_range?: [number, number] | null
+}): Promise<{ reset: number[]; count: number }> {
+  return req('/chapters/reset-range', { method: 'POST', body: JSON.stringify(params) })
 }

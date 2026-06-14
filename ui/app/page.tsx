@@ -33,8 +33,8 @@ export default function CommandDeck() {
   const [sideTab,    setSideTab]    = useState<SideTab>('forge')
   const [selectedId, setSelectedId] = useState<number | null>(null)
 
-  const [llmPath,      setLlmPath]      = useState('C:/Users/alityan/OneDrive/Desktop/shaodw salve/models/Qwen3-14B-Q4_K_M.gguf')
-  const [ttsDir,       setTtsDir]       = useState('C:/Users/alityan/OneDrive/Desktop/shaodw salve/index-tts/checkpoints')
+  const [llmPath,      setLlmPath]      = useState('')
+  const [ttsDir,       setTtsDir]       = useState('')
   const [epubPath,     setEpubPath]     = useState('')
   const [speakers,     setSpeakers]     = useState('Sunny, Nephis, Cassie, Effie, Kai')
   const [outputFormat, setOutputFormat] = useState('mp3')
@@ -105,7 +105,7 @@ export default function CommandDeck() {
     }).catch(() => {})
     let cfg: Partial<SavedConfig> = {}
     try { const r = localStorage.getItem(STORAGE_KEY); if (r) cfg = JSON.parse(r) } catch { /* */ }
-    if (cfg.llmPath && !cfg.llmPath.includes('7b')) setLlmPath(cfg.llmPath)
+    if (cfg.llmPath) setLlmPath(cfg.llmPath)
     // Migrate legacy fishDir, but ignore stale Fish Speech paths — TTS is now
     // IndexTTS2 (index-tts/checkpoints). A saved fish-speech dir would fail.
     const savedTtsDir = cfg.ttsDir || cfg.fishDir

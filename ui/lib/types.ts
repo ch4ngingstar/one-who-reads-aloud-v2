@@ -51,6 +51,17 @@ export interface Voice {
   updated_at: string
 }
 
+export interface Line {
+  id: number
+  line_index: number
+  speaker: string
+  text: string
+  emotion: string
+  status: 'pending' | 'tts_done' | 'failed'
+  audio_path: string | null
+  error_message: string | null
+}
+
 export interface PipelineStatusResponse {
   status: 'idle' | 'running' | 'paused' | 'complete' | 'error' | 'stopped'
   last_results: { success: number; error: number; skipped: number } | null

@@ -282,9 +282,8 @@ class PipelineOrchestrator:
             self._stage_assemble(ch_id)
 
         # Retrieve the finished audio path and record total processing time
-        refreshed   = self.sm.get_all_chapters(self._project_id)
-        ch_row      = next(c for c in refreshed if c["id"] == ch_id)
-        audio_path  = ch_row.get("output_audio_path", "")
+        ch_row     = self.sm.get_chapter_by_id(ch_id) or {}
+        audio_path = ch_row.get("output_audio_path", "")
         elapsed     = round(time.time() - ch_t0, 1)
 
         self.sm.mark_chapter_status(ch_id, "complete", processing_seconds=elapsed)

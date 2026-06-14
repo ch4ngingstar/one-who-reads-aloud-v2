@@ -38,6 +38,8 @@ logs/
 
 # ─── Debug / tooling artifacts ────────────────────────────
 .playwright-mcp/
+.mypy_cache/
+.ruff_cache/
 *.log
 .superpowers/
 

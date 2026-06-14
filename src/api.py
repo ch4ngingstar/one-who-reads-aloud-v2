@@ -41,7 +41,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from state_manager import StateManager
+from state_manager import StateManager, CHAPTER_STATUSES
 from orchestrator  import PipelineOrchestrator, PipelineConfig
 from epub_parser   import parse_epub
 
@@ -78,6 +78,12 @@ class PipelineStart(BaseModel):
 class VoiceSet(BaseModel):
     speaker:        str
     ref_audio_path: str
+
+
+class ChapterResetRange(BaseModel):
+    project_id:     int
+    status_filter:  Optional[list[str]] = None   # e.g. ["error", "tts_done"]; None = all
+    chapter_range:  Optional[list[int]] = None   # [start_index, end_index] inclusive; None = all
 
 
 # ── Pipeline manager ──────────────────────────────────────────────────────────
@@ -275,10 +281,7 @@ async def create_project(
 @app.get("/api/projects")
 async def list_projects(sm: StateManager = Depends(get_sm)):
     """All projects with per-project progress, for the UI project picker."""
-    projects = sm.list_projects()
-    for p in projects:
-        p["progress"] = sm.get_progress(p["id"])
-    return {"projects": projects}
+    return {"projects": sm.list_projects_with_progress()}
 
 
 @app.get("/api/project/{name}")
@@ -383,6 +386,74 @@ async def list_chapters(
     if not chapters:
         raise HTTPException(status_code=404, detail="No chapters found.")
     return {"chapters": chapters, "total": len(chapters)}
+
+
+@app.post("/api/chapters/reset-range", status_code=200)
+async def reset_chapters_range(
+    req: ChapterResetRange,
+    sm: StateManager = Depends(get_sm),
+):
+    """Reset multiple chapters to pending.
+
+    Filters by project_id, optional status_filter list, and optional
+    chapter_range [start_index, end_index] inclusive. Returns reset chapter IDs.
+    Chapters already at 'pending' are skipped.
+    """
+    if req.status_filter:
+        invalid = set(req.status_filter) - CHAPTER_STATUSES
+        if invalid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status values: {sorted(invalid)}. "
+                       f"Valid: {sorted(CHAPTER_STATUSES)}"
+            )
+
+    if req.chapter_range:
+        if len(req.chapter_range) != 2:
+            raise HTTPException(status_code=400,
+                                detail="chapter_range must have exactly 2 elements: [start, end]")
+        if req.chapter_range[0] > req.chapter_range[1]:
+            raise HTTPException(status_code=400,
+                                detail="chapter_range[0] must be <= chapter_range[1]")
+
+    all_chapters = sm.get_all_chapters(req.project_id)
+    if not all_chapters:
+        raise HTTPException(status_code=404,
+                            detail=f"No chapters found for project_id={req.project_id}")
+
+    candidates = all_chapters
+    if req.status_filter:
+        candidates = [c for c in candidates if c["status"] in req.status_filter]
+    if req.chapter_range:
+        s, e = req.chapter_range
+        candidates = [c for c in candidates if s <= c["chapter_index"] <= e]
+
+    to_reset = [c for c in candidates if c["status"] != "pending"]
+
+    reset_ids: list[int] = []
+    for ch in to_reset:
+        ok = sm.reset_chapter_to_pending(ch["id"])
+        if ok:
+            if ch.get("output_audio_path"):
+                p = _resolve_data_path(ch["output_audio_path"])
+                if p.exists():
+                    try:
+                        p.unlink()
+                    except OSError:
+                        pass
+            reset_ids.append(ch["id"])
+
+    return {"reset": reset_ids, "count": len(reset_ids)}
+
+
+@app.get("/api/chapters/{chapter_id}/lines")
+async def list_chapter_lines(
+    chapter_id: int,
+    sm: StateManager = Depends(get_sm),
+):
+    """All diarized lines for a chapter (speaker, text, emotion, status, audio_path)."""
+    lines = sm.get_lines_for_chapter(chapter_id)
+    return {"lines": lines, "total": len(lines)}
 
 
 @app.delete("/api/chapters/{chapter_id}/audio")

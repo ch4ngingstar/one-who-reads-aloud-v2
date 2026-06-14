@@ -226,6 +226,7 @@ _DEFAULT_CFG = {
     # (~90 min chapters with fp32). Passed straight to IndexTTS2.infer().
     "max_text_tokens_per_segment": 200,
     "num_beams":      3,
+    "db_flush_every": 10,   # write tts_done updates to DB every N lines (resume granularity)
 }
 
 
@@ -445,6 +446,7 @@ class TTSEngine:
 
         total         = len(lines)
         success_count = 0
+        _pending_db: list[tuple[int, str]] = []
         print(f"[tts] Synthesising {total} lines for chapter {chapter_id}...")
 
         for processed, line in enumerate(lines, start=1):
@@ -506,8 +508,11 @@ class TTSEngine:
 
             if wav_bytes:
                 audio_path.write_bytes(wav_bytes)
-                self.sm.mark_line_tts_done(line["id"], str(audio_path))
+                _pending_db.append((line["id"], str(audio_path)))
                 success_count += 1
+                if len(_pending_db) >= self.cfg["db_flush_every"]:
+                    self.sm.mark_lines_tts_done(_pending_db)
+                    _pending_db.clear()
                 fallback_note = " [_default]" if using_fallback else ""
                 print(f"[tts]   OK  line {line['line_index']:>4}  [{line['speaker']:<12}] "
                       f"{line['emotion']:<12}{fallback_note} -> {audio_path.name}")
@@ -517,6 +522,10 @@ class TTSEngine:
 
             if progress_callback:
                 progress_callback(processed, total, line)
+
+        if _pending_db:
+            self.sm.mark_lines_tts_done(_pending_db)
+            _pending_db.clear()
 
         self.sm.mark_chapter_status(chapter_id, "tts_done")
         print(f"[tts] Chapter {chapter_id} done: "

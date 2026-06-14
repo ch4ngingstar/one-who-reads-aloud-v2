@@ -95,6 +95,7 @@ _DEFAULT_CFG = {
     "max_tokens":   4096,
     "retry_temp":   0.5,
     "max_retries":  3,
+    "no_think":     None,   # None = auto-detect from model filename; True/False to force
 }
 
 # ── System prompt ──────────────────────────────────────────────────────────────
@@ -533,7 +534,11 @@ class LLMDirector:
             return []
 
         user_msg = self._format_segments(segments)
-        if "qwen3" in self.model_path.name.lower():
+        _no_think = self.cfg.get("no_think")
+        if _no_think is None:
+            _model_name = self.model_path.name.lower()
+            _no_think = "qwen3" in _model_name or "qwen-3" in _model_name
+        if _no_think:
             user_msg += "\n/no_think"  # disable hybrid thinking on Qwen3
 
         last_error: Optional[Exception] = None
