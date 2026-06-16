@@ -37,7 +37,9 @@ PROGRESS EVENTS (emitted to callback and collected in self.events):
 """
 
 import collections
+import datetime
 import re
+import shutil
 import subprocess
 import time
 import threading
@@ -109,8 +111,10 @@ class PipelineConfig:
 
     # Behaviour
     vram_check_enabled:   bool = True
-    vram_wait_timeout_s:  int  = 30   # seconds to poll for VRAM to drop before warning
+    vram_wait_timeout_s:  int  = 180   # seconds to poll for VRAM to drop before warning
     chapter_range:        "tuple[int,int] | None" = None  # (start_idx, end_idx) inclusive
+    log_path:             str  = "data/pipeline.log"   # set "" to disable file logging
+    cleanup_wavs:         bool = True   # delete per-line WAVs after successful assembly
 
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────
@@ -150,6 +154,13 @@ class PipelineOrchestrator:
         self._current_stage: str = "unknown"
         self._vram_baseline_mb: int = -1   # set per chapter, before the LLM loads
 
+        self._log_lock = threading.Lock()
+        self._log_file = None
+        if config.log_path:
+            log_p = Path(config.log_path)
+            log_p.parent.mkdir(parents=True, exist_ok=True)
+            self._log_file = open(log_p, "a", encoding="utf-8", buffering=1)
+
     # ── Public API ────────────────────────────────────────────────────────────
 
     def run(self) -> dict:
@@ -158,51 +169,61 @@ class PipelineOrchestrator:
           { "success": int, "error": int, "skipped": int, "elapsed_s": float }
         """
         t0 = time.time()
+        if self._log_file:
+            with self._log_lock:
+                run_ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self._log_file.write(f"\n{'='*60}\n[{run_ts}] RUN START\n{'='*60}\n")
 
-        # Step 1: Parse EPUB + seed DB
-        self._setup()
+        try:
+            # Step 1: Parse EPUB + seed DB
+            self._setup()
 
-        chapters = self._chapters_to_process()
-        self._emit("pipeline_start",
-                   project=Path(self.cfg.epub_path).stem,
-                   total=len(chapters))
+            chapters = self._chapters_to_process()
+            self._emit("pipeline_start",
+                       project=Path(self.cfg.epub_path).stem,
+                       total=len(chapters))
 
-        results = {"success": 0, "error": 0, "skipped": 0}
+            results = {"success": 0, "error": 0, "skipped": 0}
 
-        for chapter in chapters:
-            self._pause_event.wait()   # blocks while paused
-            if not self._stop_event.is_set():
-                break                  # stop() was called
+            for chapter in chapters:
+                self._pause_event.wait()   # blocks while paused
+                if not self._stop_event.is_set():
+                    break                  # stop() was called
 
-            stages = self._stages_for_chapter(chapter)
-            if not stages:
-                self._emit("chapter_skip",
-                           chapter_id=chapter["id"],
-                           reason=f"status={chapter['status']}")
-                results["skipped"] += 1
-                continue
+                stages = self._stages_for_chapter(chapter)
+                if not stages:
+                    self._emit("chapter_skip",
+                               chapter_id=chapter["id"],
+                               reason=f"status={chapter['status']}")
+                    results["skipped"] += 1
+                    continue
 
-            try:
-                self._run_chapter(chapter, stages)
-                results["success"] += 1
-            except Exception as exc:
-                failed_stage = self._current_stage
-                self._emit("chapter_error",
-                           chapter_id=chapter["id"],
-                           stage=failed_stage,
-                           error=str(exc))
-                self.sm.mark_chapter_status(
-                    chapter["id"], "error",
-                    error_message=f"[failed_stage:{failed_stage}] {exc}"
-                )
-                results["error"] += 1
+                try:
+                    self._run_chapter(chapter, stages)
+                    results["success"] += 1
+                except Exception as exc:
+                    failed_stage = self._current_stage
+                    self._emit("chapter_error",
+                               chapter_id=chapter["id"],
+                               stage=failed_stage,
+                               error=str(exc))
+                    self.sm.mark_chapter_status(
+                        chapter["id"], "error",
+                        error_message=f"[failed_stage:{failed_stage}] {exc}"
+                    )
+                    results["error"] += 1
 
-        elapsed = round(time.time() - t0, 1)
-        if self._stop_event.is_set():
-            self._emit("pipeline_done", elapsed_s=elapsed, **results)
-        else:
-            self._emit("pipeline_stopped", elapsed_s=elapsed, **results)
-        return results
+            elapsed = round(time.time() - t0, 1)
+            if self._stop_event.is_set():
+                self._emit("pipeline_done", elapsed_s=elapsed, **results)
+            else:
+                self._emit("pipeline_stopped", elapsed_s=elapsed, **results)
+            return results
+        finally:
+            if self._log_file:
+                with self._log_lock:
+                    self._log_file.close()
+                self._log_file = None
 
     def pause(self)  -> None: self._pause_event.clear()
     def resume(self) -> None: self._pause_event.set()
@@ -368,6 +389,9 @@ class PipelineOrchestrator:
         self._emit("stage_done", chapter_id=chapter_id, stage="assemble",
                    elapsed_s=round(time.time() - t0, 1))
 
+        if self.cfg.cleanup_wavs:
+            self._cleanup_chapter_wavs(chapter_id)
+
     # ── VRAM barrier ──────────────────────────────────────────────────────────
 
     def _vram_barrier(self) -> None:
@@ -415,9 +439,69 @@ class PipelineOrchestrator:
         self.events.append(event)
         self.on_progress(event)
         _log_event(event)
+        self._write_log(event)
+
+    def _write_log(self, event: dict) -> None:
+        if not self._log_file:
+            return
+        line = _format_log_line(event)
+        if not line:
+            return
+        with self._log_lock:
+            self._log_file.write(line + "\n")
+
+    def _cleanup_chapter_wavs(self, chapter_id: int) -> None:
+        wav_dir = Path(self.cfg.audio_wav_dir) / f"ch_{chapter_id:04d}"
+        if not wav_dir.exists():
+            return
+        n_wavs = sum(1 for f in wav_dir.iterdir() if f.suffix == ".wav")
+        shutil.rmtree(wav_dir)
+        print(f"[orch] Cleaned {n_wavs} WAV(s) for chapter {chapter_id}")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _format_log_line(event: dict) -> str:
+    """Convert a pipeline event to a human-readable log line (empty = don't log)."""
+    ts    = datetime.datetime.fromtimestamp(event.get("ts", time.time()))
+    stamp = ts.strftime("%Y-%m-%d %H:%M:%S")
+    t     = event.get("type", "")
+
+    if t == "pipeline_start":
+        return (f"[{stamp}] PIPELINE START — "
+                f"project={event.get('project')} total={event.get('total')}")
+    if t in ("pipeline_done", "pipeline_stopped"):
+        label = "DONE" if t == "pipeline_done" else "STOPPED"
+        return (f"[{stamp}] PIPELINE {label} — "
+                f"success={event.get('success')} "
+                f"error={event.get('error')} "
+                f"skipped={event.get('skipped')} "
+                f"({event.get('elapsed_s')}s)")
+    if t == "chapter_start":
+        stages = ",".join(event.get("stages", []))
+        return f"[{stamp}] CH {event.get('chapter_id', 0):04d} START — {stages}"
+    if t == "chapter_done":
+        path = Path(event.get("audio_path") or "").name
+        return (f"[{stamp}] CH {event.get('chapter_id', 0):04d} COMPLETE "
+                f"({event.get('elapsed_s')}s) -> {path}")
+    if t == "chapter_error":
+        return (f"[{stamp}] CH {event.get('chapter_id', 0):04d} ERROR "
+                f"at {event.get('stage')}: {event.get('error')}")
+    if t == "chapter_skip":
+        return (f"[{stamp}] CH {event.get('chapter_id', 0):04d} SKIP "
+                f"({event.get('reason')})")
+    if t == "stage_start":
+        return (f"[{stamp}] CH {event.get('chapter_id', 0):04d} "
+                f">> {event.get('stage')}")
+    if t == "stage_done":
+        return (f"[{stamp}] CH {event.get('chapter_id', 0):04d} "
+                f"<< {event.get('stage')} ({event.get('elapsed_s')}s)")
+    if t == "vram_warning":
+        return (f"[{stamp}] VRAM WARNING: {event.get('used_mb')} MB used "
+                f"(baseline {event.get('baseline_mb')} MB, "
+                f"limit {event.get('threshold_mb')} MB)")
+    return ""   # tts_progress and others are too noisy for the file log
+
 
 def _query_vram_used_mb() -> int:
     """Returns VRAM used in MB on GPU 0 via nvidia-smi, or -1 on failure."""

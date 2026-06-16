@@ -143,6 +143,15 @@ class AudioAssembler:
             # Run FFmpeg
             self._run_ffmpeg(list_path, output_path)
 
+        # Guard against FFmpeg producing an empty/corrupt file with exit 0
+        actual_size = output_path.stat().st_size if output_path.exists() else 0
+        if actual_size < 4096:
+            raise RuntimeError(
+                f"Assembly produced a suspiciously small file ({actual_size} bytes): "
+                f"{output_path}. FFmpeg may have written nothing. "
+                "Check console output above for warnings."
+            )
+
         file_size = output_path.stat().st_size
         size_mb   = file_size / (1024 * 1024)
         print(f"[assemble] Done: {output_path.name}  ({size_mb:.2f} MB)")

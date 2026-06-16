@@ -15,6 +15,10 @@
 
 A local pipeline that turns the *Shadow Slave* web novel into a multi-voice audiobook. Feed it an EPUB and it produces chapter MP3s where every character speaks in their own cloned voice, and every line is delivered with an emotion chosen by an LLM. The whole thing runs on a single consumer GPU — no APIs, no cloud, nothing leaves your machine.
 
+<p align="center">
+  <a href="https://github.com/ch4ngingstar/one-who-reads-aloud-v2/releases/download/demo-audio/ch_0675.mp3"><strong>Listen to the demo</strong></a> — 7 voices, original scene, ~2 min.
+</p>
+
 ![UI demo — Command Deck · live pipeline run · per-line inspector](docs/screenshots/demo.gif)
 
 <details>
