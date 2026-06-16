@@ -65,7 +65,7 @@ def _make_assembler(sm, output_dir, mock_ffmpeg=True):
     if mock_ffmpeg:
         asm._check_ffmpeg = lambda: None
         def fake_run(list_path, out_path):
-            out_path.write_bytes(b"FAKE_AUDIO_DATA")
+            out_path.write_bytes(b"FAKE_AUDIO_DATA" * 300)  # >4096 bytes to pass size check
         asm._run_ffmpeg = fake_run
     return asm
 
@@ -365,7 +365,7 @@ def test_assemble_chapter_ffmpeg_receives_correct_list():
 
         def capture_run(list_path, out_path):
             captured_list[0] = list_path.read_text(encoding="utf-8")
-            out_path.write_bytes(b"FAKE")
+            out_path.write_bytes(b"FAKE" * 1025)  # >4096 bytes to pass size check
 
         asm = _make_assembler(sm, out_dir, mock_ffmpeg=False)
         asm._check_ffmpeg = lambda: None
