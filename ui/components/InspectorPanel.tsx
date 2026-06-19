@@ -3,7 +3,9 @@ import { useEffect, useState } from 'react'
 import ConfirmButton from '@/components/ConfirmButton'
 import VoiceMapper from '@/components/VoiceMapper'
 import LiveLog from '@/components/LiveLog'
-import { deleteChapterAudio, getLines, resetChapter } from '@/lib/api'
+import {
+  chapterSegmentsUrl, deleteChapterAudio, getLines, importChapterLabels, resetChapter,
+} from '@/lib/api'
 import { formatMB, parseChapterError } from '@/lib/format'
 import type { Chapter, Line, SSEEvent, Voice } from '@/lib/types'
 import type { LiveLine, Stage } from '@/hooks/usePipelineState'
@@ -113,6 +115,80 @@ function LineRow({ line }: { line: Line }) {
   )
 }
 
+interface LabelResult { name: string; ok: boolean; message: string }
+
+/** Export a chapter's segments and import externally-formatted labels.
+ *  Lets the user diarize anywhere (cloud LLM / hand) instead of the local LLM. */
+function ExternalDiarization({ chapter, onChanged }: {
+  chapter: Chapter; onChanged: () => void
+}) {
+  const [results, setResults] = useState<LabelResult[]>([])
+  const [busy, setBusy] = useState(false)
+  const padded = String(chapter.id).padStart(4, '0')
+
+  async function handleUpload(files: FileList | null) {
+    if (!files || files.length === 0) return
+    setBusy(true)
+    const out: LabelResult[] = []
+    for (const file of Array.from(files)) {
+      const m = file.name.match(/ch_(\d+)\.labels\.json$/)
+      if (!m) {
+        out.push({ name: file.name, ok: false, message: 'not a ch_XXXX.labels.json file' })
+        continue
+      }
+      const chapterId = parseInt(m[1], 10)
+      try {
+        const body = JSON.parse(await file.text())
+        const data = await importChapterLabels(chapterId, body)
+        out.push({ name: file.name, ok: true, message: `diarized (${data.lines} lines)` })
+      } catch (err) {
+        out.push({ name: file.name, ok: false, message: err instanceof Error ? err.message : String(err) })
+      }
+    }
+    setResults(out)
+    setBusy(false)
+    if (out.some(r => r.ok)) onChanged()
+  }
+
+  return (
+    <section className="mt-5 pt-4 border-t border-[#1a1a1a]">
+      <div className="text-[9px] tracking-[2px] uppercase text-spell-g4 mb-2.5">
+        External diarization
+      </div>
+      <div className="flex gap-2">
+        <a
+          className="btn flex-1 text-center"
+          href={chapterSegmentsUrl(chapter.id)}
+          download={`ch_${padded}.segments.json`}
+        >↓ Export segments</a>
+        <label className="btn flex-1 text-center cursor-pointer" aria-disabled={busy}>
+          ↑ Import labels
+          <input
+            type="file"
+            accept=".json,application/json"
+            multiple
+            className="hidden"
+            disabled={busy}
+            onChange={e => handleUpload(e.target.files)}
+          />
+        </label>
+      </div>
+      {results.length > 0 && (
+        <div className="mt-2.5 space-y-1">
+          {results.map(r => (
+            <p
+              key={r.name}
+              className={`text-[10px] leading-snug break-words ${r.ok ? 'text-emerald-500' : 'text-blood-text'}`}
+            >
+              {r.name}: {r.message}
+            </p>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
 function ChapterDetail({ chapter, onPlay, onChanged }: {
   chapter: Chapter; onPlay: (id: number) => void; onChanged: () => void
 }) {
@@ -187,6 +263,10 @@ function ChapterDetail({ chapter, onPlay, onChanged }: {
             >✕ Delete</ConfirmButton>
           )}
         </div>
+
+        {(chapter.status === 'pending' || chapter.status === 'diarized') && (
+          <ExternalDiarization chapter={chapter} onChanged={onChanged} />
+        )}
       </div>
 
       {hasDiarization && lines.length > 0 && (

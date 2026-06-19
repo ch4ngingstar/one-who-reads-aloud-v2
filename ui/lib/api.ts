@@ -126,6 +126,30 @@ export async function resetChapter(chapterId: number): Promise<{ reset: number }
   return req(`/chapters/${chapterId}/reset`, { method: 'POST' })
 }
 
+// ── External diarization import ────────────────────────────────────────────────
+
+export interface LabelsPayload {
+  chapter_id?: number
+  labels: { i: number; speaker: string; emotion: string }[]
+}
+
+/** Download URL for a chapter's deterministic segments (external diarization). */
+export function chapterSegmentsUrl(chapterId: number): string {
+  return `${BASE}/chapters/${chapterId}/segments`
+}
+
+/** Import externally-produced speaker/emotion labels → status 'diarized'. */
+export async function importChapterLabels(
+  chapterId: number,
+  body: LabelsPayload,
+  force = false,
+): Promise<{ chapter_id: number; lines: number; status: string }> {
+  return req(`/chapters/${chapterId}/labels${force ? '?force=true' : ''}`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
 export async function resetChapters(params: {
   project_id: number
   status_filter?: string[] | null
