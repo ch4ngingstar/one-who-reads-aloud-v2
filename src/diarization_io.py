@@ -70,3 +70,72 @@ def build_system_prompt_text(speakers: "list[str] | None" = None) -> str:
     """
     spk = speakers if speakers is not None else DEFAULT_SPEAKERS
     return _build_system_prompt(spk)
+
+
+# Statuses a plain import may land on. Anything further requires force=True.
+_OVERWRITABLE = {"pending", "diarized", "error"}
+
+
+class ImportRejected(Exception):
+    """Raised when an external label file is invalid or unsafe to apply."""
+
+
+def validate_labels(payload: dict, segments: "list[dict]") -> "dict[int, tuple[str, str]]":
+    """Structural validation; returns an index -> (speaker, emotion) map.
+
+    Content (out-of-roster speaker / bad emotion) is NOT validated here -- it is
+    repaired downstream by enforce_labels, exactly as the LLM path self-heals.
+    """
+    if not isinstance(payload, dict) or "labels" not in payload:
+        raise ImportRejected("labels file missing 'labels' array")
+    raw = payload["labels"]
+    if not isinstance(raw, list):
+        raise ImportRejected("'labels' must be a list")
+
+    n = len(segments)
+    if len(raw) != n:
+        raise ImportRejected(
+            f"label count {len(raw)} != segment count {n} -- stale export, re-export this chapter")
+
+    mapping: dict[int, tuple[str, str]] = {}
+    for entry in raw:
+        try:
+            i = int(entry["i"])
+            speaker = str(entry["speaker"])
+            emotion = str(entry["emotion"])
+        except (KeyError, TypeError, ValueError) as e:
+            raise ImportRejected(f"malformed label entry {entry!r}: {e}")
+        if not (0 <= i < n):
+            raise ImportRejected(f"label index {i} out of range 0..{n - 1}")
+        if i in mapping:
+            raise ImportRejected(f"duplicate label index {i}")
+        mapping[i] = (speaker, emotion)
+
+    missing = set(range(n)) - mapping.keys()
+    if missing:
+        raise ImportRejected(f"missing label indices: {sorted(missing)}")
+    return mapping
+
+
+def import_labels(sm, chapter_id: int, payload: dict, *,
+                  force: bool = False,
+                  speakers: "list[str] | None" = None) -> int:
+    """Validate external labels, enforce, and persist as diarized lines.
+
+    Returns the number of lines written. Raises ImportRejected on any guard.
+    """
+    chapter = sm.get_chapter_by_id(chapter_id)
+    if chapter is None:
+        raise ImportRejected(f"no chapter with id={chapter_id}")
+    if not force and chapter["status"] not in _OVERWRITABLE:
+        raise ImportRejected(
+            f"chapter {chapter_id} status '{chapter['status']}' is past diarized; "
+            f"pass force=True to overwrite")
+
+    segments = segment_chapter(sm, chapter_id)
+    mapping = validate_labels(payload, segments)
+    allowed = _allowed_speakers(speakers if speakers is not None else DEFAULT_SPEAKERS)
+
+    lines = enforce_labels(segments, mapping, allowed, line_offset=0)
+    sm.save_diarized_lines(chapter_id, lines)
+    return len(lines)
