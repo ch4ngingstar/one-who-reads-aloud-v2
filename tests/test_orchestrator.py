@@ -22,8 +22,15 @@ from orchestrator  import PipelineOrchestrator, PipelineConfig, _query_vram_used
 # ── Fake module classes ───────────────────────────────────────────────────────
 
 class FakeLLMDirector:
-    """Marks chapter as diarized and writes mock lines."""
+    """Marks chapter as diarized and writes mock lines.
+
+    `instances` records every construction (one per stage-batch under the
+    batched orchestrator); `processed` records every chapter_id actually
+    diarized, so tests can assert which chapters the LLM touched without
+    relying on a fresh instance per chapter.
+    """
     instances = []
+    processed = []
 
     def __init__(self, model_path, sm, speakers=None, cfg=None):
         self.sm = sm
@@ -40,6 +47,7 @@ class FakeLLMDirector:
         return False
 
     def process_chapter(self, chapter_id):
+        FakeLLMDirector.processed.append(chapter_id)
         self.sm.save_diarized_lines(chapter_id, [
             {"line_index": 0, "speaker": "Narrator",
              "text": "Test line.", "emotion": "neutral"},
@@ -49,8 +57,11 @@ class FakeLLMDirector:
 
 class FakeTTSEngine:
     """Marks lines as tts_done and chapter as tts_done."""
+    instances = []
+
     def __init__(self, sm, wav_dir, model_dir=None, **kwargs):
         self.sm = sm
+        FakeTTSEngine.instances.append(self)
 
     def __enter__(self):
         return self
@@ -108,6 +119,8 @@ def _make_config(**overrides) -> PipelineConfig:
     tmp_db.close()
     tmp_wav = tempfile.mkdtemp()
     tmp_mp3 = tempfile.mkdtemp()
+    tmp_log = tempfile.NamedTemporaryFile(suffix=".log", delete=False)
+    tmp_log.close()
 
     defaults = dict(
         epub_path="fake_book.epub",
@@ -116,6 +129,9 @@ def _make_config(**overrides) -> PipelineConfig:
         db_path=tmp_db.name,
         audio_wav_dir=tmp_wav,
         audio_mp3_dir=tmp_mp3,
+        # Never write to the real data/pipeline.log — tests would clobber the
+        # production run history used to measure per-stage timings.
+        log_path=tmp_log.name,
         vram_check_enabled=False,  # skip nvidia-smi in tests
     )
     defaults.update(overrides)
@@ -125,6 +141,8 @@ def _make_config(**overrides) -> PipelineConfig:
 def _make_orch(config=None, **kwargs) -> PipelineOrchestrator:
     cfg = config or _make_config()
     FakeLLMDirector.instances.clear()
+    FakeLLMDirector.processed.clear()
+    FakeTTSEngine.instances.clear()
     return PipelineOrchestrator(
         cfg,
         llm_director_cls=FakeLLMDirector,
@@ -180,14 +198,19 @@ def test_resume_skips_complete_chapters():
     orch.sm.mark_chapter_status(chapters[0]["id"], "complete")
 
     FakeLLMDirector.instances.clear()
+    FakeLLMDirector.processed.clear()
     results = orch.run()
 
     assert results["success"] == 2
     assert results["skipped"] == 1
 
-    # LLMDirector should only have been instantiated twice
-    assert len(FakeLLMDirector.instances) == 2, (
-        f"Expected 2 LLM instantiations, got {len(FakeLLMDirector.instances)}"
+    # The two remaining chapters share ONE LLM load (stage-batched), and the
+    # already-complete chapter is never diarized.
+    assert len(FakeLLMDirector.instances) == 1, (
+        f"Expected 1 batched LLM load, got {len(FakeLLMDirector.instances)}"
+    )
+    assert chapters[0]["id"] not in FakeLLMDirector.processed, (
+        "Completed chapter must not be re-diarized"
     )
     print("  PASS test_resume_skips_complete_chapters")
 
@@ -204,13 +227,20 @@ def test_resume_from_diarized_skips_llm():
     ])
 
     FakeLLMDirector.instances.clear()
+    FakeLLMDirector.processed.clear()
     results = orch.run()
 
     assert results["success"] == 3
-    # Only 2 LLM calls (chapters 1 and 2); chapter 0 was already diarized
-    assert len(FakeLLMDirector.instances) == 2, (
-        f"Expected 2 LLM calls, got {len(FakeLLMDirector.instances)}"
+    # One batched LLM load covers chapters 1 and 2; chapter 0 was already
+    # diarized and must NOT be re-processed.
+    assert len(FakeLLMDirector.instances) == 1, (
+        f"Expected 1 batched LLM load, got {len(FakeLLMDirector.instances)}"
     )
+    assert chapters[0]["id"] not in FakeLLMDirector.processed, (
+        "Pre-diarized chapter must not be re-diarized"
+    )
+    assert chapters[1]["id"] in FakeLLMDirector.processed
+    assert chapters[2]["id"] in FakeLLMDirector.processed
     print("  PASS test_resume_from_diarized_skips_llm")
 
 
@@ -231,16 +261,19 @@ def test_chapter_range_filters_correctly():
 
 def test_error_in_one_chapter_continues_pipeline():
     class BrokenLLM:
+        # One instance now diarizes the whole batch, so failure must be tracked
+        # per process_chapter call, not per construction.
+        _call_count = 0
+
         def __init__(self, model_path, sm, **kwargs):
             self.sm = sm
-            self._call_count = getattr(BrokenLLM, '_call_count', 0)
-            BrokenLLM._call_count = self._call_count + 1
 
         def __enter__(self): return self
         def __exit__(self, *args): return False
 
         def process_chapter(self, chapter_id):
-            # Fail for the first chapter only
+            BrokenLLM._call_count += 1
+            # Fail for the first chapter only; the batch must continue past it.
             if BrokenLLM._call_count == 1:
                 raise RuntimeError("Simulated LLM crash")
             self.sm.save_diarized_lines(chapter_id, [
@@ -382,17 +415,19 @@ def test_error_chapter_resumes_from_synthesize():
     """Chapter that errors at synthesize should skip re-diarizing on retry."""
 
     class BrokenTTSOnce:
-        _call_count = 0
+        # One TTS load now serves the whole batch, so the OOM must be tracked
+        # per synthesize call: fail only the very first chapter, the first run.
+        _calls = 0
 
         def __init__(self, sm, wav_dir, model_dir=None, **kwargs):
             self.sm = sm
-            BrokenTTSOnce._call_count += 1
 
         def __enter__(self): return self
         def __exit__(self, *args): return False
 
         def process_chapter(self, chapter_id, progress_callback=None):
-            if BrokenTTSOnce._call_count == 1:
+            BrokenTTSOnce._calls += 1
+            if BrokenTTSOnce._calls == 1:
                 raise RuntimeError("Simulated TTS OOM")
             lines = self.sm.get_pending_tts_lines(chapter_id)
             for line in lines:
@@ -400,7 +435,7 @@ def test_error_chapter_resumes_from_synthesize():
             self.sm.mark_chapter_status(chapter_id, "tts_done")
             return len(lines)
 
-    BrokenTTSOnce._call_count = 0
+    BrokenTTSOnce._calls = 0
     cfg = _make_config()
     orch = PipelineOrchestrator(
         cfg,
@@ -515,6 +550,64 @@ def test_live_text_is_truncated():
     print("  PASS test_live_text_is_truncated")
 
 
+def test_stage_batching_loads_each_model_once():
+    """The core win: 3 chapters in one batch => ONE LLM load + ONE TTS load,
+    not one of each per chapter. All three still complete."""
+    cfg  = _make_config(batch_size=25)  # all 3 chapters fit in one batch
+    orch = _make_orch(config=cfg)
+    results = orch.run()
+
+    assert results["success"] == 3, results
+    assert len(FakeLLMDirector.instances) == 1, (
+        f"Expected 1 LLM load for the whole batch, got {len(FakeLLMDirector.instances)}"
+    )
+    assert len(FakeTTSEngine.instances) == 1, (
+        f"Expected 1 TTS load for the whole batch, got {len(FakeTTSEngine.instances)}"
+    )
+    # Every chapter was diarized exactly once under that single load.
+    assert len(FakeLLMDirector.processed) == 3
+    print("  PASS test_stage_batching_loads_each_model_once")
+
+
+def test_subbatch_boundary_reloads_per_batch():
+    """batch_size bounds power-cut blast radius: with batch_size=2 and 3 chapters
+    there are 2 sub-batches => 2 LLM loads and 2 TTS loads (not 1, not 3)."""
+    cfg  = _make_config(batch_size=2)
+    orch = _make_orch(config=cfg)
+    results = orch.run()
+
+    assert results["success"] == 3, results
+    assert len(FakeLLMDirector.instances) == 2, (
+        f"Expected 2 batched LLM loads (3 chapters / batch_size 2), "
+        f"got {len(FakeLLMDirector.instances)}"
+    )
+    assert len(FakeTTSEngine.instances) == 2, (
+        f"Expected 2 batched TTS loads, got {len(FakeTTSEngine.instances)}"
+    )
+    print("  PASS test_subbatch_boundary_reloads_per_batch")
+
+
+def test_stage_order_is_batched_not_interleaved():
+    """All diarize stage_done events for a batch precede every synthesize
+    stage_start — proof the pipeline runs stage-by-stage, not chapter-by-chapter."""
+    events = []
+    orch = _make_orch(progress_callback=events.append)
+    orch.run()
+
+    last_diarize_done = max(
+        i for i, e in enumerate(events)
+        if e["type"] == "stage_done" and e.get("stage") == "diarize"
+    )
+    first_synth_start = min(
+        i for i, e in enumerate(events)
+        if e["type"] == "stage_start" and e.get("stage") == "synthesize"
+    )
+    assert last_diarize_done < first_synth_start, (
+        "Synthesis began before all diarization finished — not stage-batched"
+    )
+    print("  PASS test_stage_order_is_batched_not_interleaved")
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 TESTS = [
@@ -535,6 +628,9 @@ TESTS = [
     test_vram_barrier_is_delta_based,
     test_tts_progress_event_carries_line_fields,
     test_live_text_is_truncated,
+    test_stage_batching_loads_each_model_once,
+    test_subbatch_boundary_reloads_per_batch,
+    test_stage_order_is_batched_not_interleaved,
 ]
 
 if __name__ == "__main__":

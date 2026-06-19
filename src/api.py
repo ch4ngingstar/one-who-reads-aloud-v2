@@ -68,6 +68,7 @@ class PipelineStart(BaseModel):
     chapter_range:      Optional[list[int]] = None   # [start, end] inclusive
     output_format:      str   = "mp3"
     vram_check_enabled: bool  = True
+    batch_size:         int   = 8   # chapters per LLM/TTS load-unload cycle (measured swap tax ~47s/ch, mostly the 40s TTS load)
 
     @property
     def resolved_model_dir(self) -> str:
@@ -342,6 +343,7 @@ async def start_pipeline(
         chapter_range     = ch_range,
         output_format     = req.output_format,
         vram_check_enabled= req.vram_check_enabled,
+        batch_size        = max(1, req.batch_size),
     )
 
     try:

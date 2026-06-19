@@ -4,13 +4,20 @@ Module 6: Pipeline Orchestrator
 Sequences Modules 1-5 chapter-by-chapter with resume support,
 per-stage error isolation, and a progress callback for the FastAPI SSE stream.
 
-VRAM LIFECYCLE ENFORCED HERE:
-  For every chapter:
+VRAM LIFECYCLE ENFORCED HERE (STAGE-BATCHED):
+  Chapters are processed in moderate sub-batches (cfg.batch_size). For EACH
+  sub-batch the expensive model loads are paid ONCE, not once per chapter:
     0. Baseline snapshot     [ VRAM held by desktop apps before the LLM loads ]
-    1. LLMDirector context  [ loads ~8.5GB ] → process → [ purges VRAM ]
+    1. LLMDirector context  [ loads ~8.5GB ] → diarize EVERY chapter → [ purge ]
     2. VRAM barrier check   [ waits until usage returns to ~baseline before TTS ]
-    3. TTSEngine context     [ IndexTTS2 ~8GB ] → process → [ unloads model ]
-    4. AudioAssembler.assemble_chapter()      [ CPU only, 0 VRAM ]
+    3. TTSEngine context     [ IndexTTS2 ~8GB ] → synthesize EVERY chapter → [ unload ]
+    4. AudioAssembler.assemble_chapter()  for every chapter [ CPU only, 0 VRAM ]
+
+  This collapses the per-chapter load/unload/barrier tax (paid N times in the
+  old chapter-at-a-time loop) to once per sub-batch. Per-chunk LLM calls are
+  stateless, so diarization output is identical to the unbatched path. Batches
+  stay small so a power cut never costs more than one batch of progress —
+  every chapter still commits its status to SQLite as it finishes each stage.
 
   The barrier is delta-based: browsers/compositor VRAM is in the baseline and
   cancels out, so only memory the *pipeline* added is waited on.
@@ -115,6 +122,31 @@ class PipelineConfig:
     chapter_range:        "tuple[int,int] | None" = None  # (start_idx, end_idx) inclusive
     log_path:             str  = "data/pipeline.log"   # set "" to disable file logging
     cleanup_wavs:         bool = True   # delete per-line WAVs after successful assembly
+    # Chapters per stage-batch: one LLM + one TTS load amortised across this many
+    # chapters. Measured swap tax is ~47s/chapter (40s of it the IndexTTS2 load;
+    # LLM load is 7s, the VRAM barrier is instant). Amortised: bs=8 → ~6s/chapter,
+    # capturing ~90% of the saving vs bs=25 while getting audio out far sooner and
+    # losing almost nothing to a power cut (status commits to SQLite per chapter).
+    batch_size:           int  = 8
+
+
+# ── Per-chapter batch state ─────────────────────────────────────────────────
+
+class _ChapterPlan:
+    """Mutable per-chapter state threaded through the three batched phases.
+
+    `elapsed` accumulates only this chapter's own stage time (not wall-clock),
+    so processing_seconds stays meaningful even though a chapter's diarize and
+    assemble are now separated by other chapters' work within the batch.
+    """
+    __slots__ = ("chapter", "stages", "errored", "started", "elapsed")
+
+    def __init__(self, chapter: dict, stages: list):
+        self.chapter = chapter
+        self.stages  = stages
+        self.errored = False
+        self.started = False
+        self.elapsed = 0.0
 
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────
@@ -165,7 +197,16 @@ class PipelineOrchestrator:
 
     def run(self) -> dict:
         """
-        Execute the full pipeline. Returns a summary dict:
+        Execute the full pipeline with STAGE-BATCHED scheduling.
+
+        Chapters are grouped into sub-batches of cfg.batch_size. Within each
+        sub-batch the LLM is loaded once to diarize every chapter, unloaded, the
+        VRAM barrier is crossed once, then IndexTTS2 is loaded once to synthesize
+        every chapter, and assembly runs on CPU. This pays the load/unload/barrier
+        tax once per batch instead of once per chapter, while small batches keep a
+        power cut from costing more than one batch of progress.
+
+        Returns a summary dict:
           { "success": int, "error": int, "skipped": int, "elapsed_s": float }
         """
         t0 = time.time()
@@ -185,11 +226,10 @@ class PipelineOrchestrator:
 
             results = {"success": 0, "error": 0, "skipped": 0}
 
+            # Build the work plan; chapters needing no stages are skipped up front
+            # (in chapter order) so the batches below contain only real work.
+            plan: "list[_ChapterPlan]" = []
             for chapter in chapters:
-                self._pause_event.wait()   # blocks while paused
-                if not self._stop_event.is_set():
-                    break                  # stop() was called
-
                 stages = self._stages_for_chapter(chapter)
                 if not stages:
                     self._emit("chapter_skip",
@@ -197,21 +237,16 @@ class PipelineOrchestrator:
                                reason=f"status={chapter['status']}")
                     results["skipped"] += 1
                     continue
+                plan.append(_ChapterPlan(chapter, stages))
 
-                try:
-                    self._run_chapter(chapter, stages)
-                    results["success"] += 1
-                except Exception as exc:
-                    failed_stage = self._current_stage
-                    self._emit("chapter_error",
-                               chapter_id=chapter["id"],
-                               stage=failed_stage,
-                               error=str(exc))
-                    self.sm.mark_chapter_status(
-                        chapter["id"], "error",
-                        error_message=f"[failed_stage:{failed_stage}] {exc}"
-                    )
-                    results["error"] += 1
+            # Process in moderate sub-batches: one model load/unload pair covers
+            # the whole batch, but progress lost to a power cut is bounded by it.
+            batch_size = max(1, self.cfg.batch_size)
+            for start in range(0, len(plan), batch_size):
+                self._pause_event.wait()           # blocks while paused
+                if not self._stop_event.is_set():
+                    break                          # stop() was called
+                self._run_batch(plan[start:start + batch_size], results)
 
             elapsed = round(time.time() - t0, 1)
             if self._stop_event.is_set():
@@ -280,70 +315,157 @@ class PipelineOrchestrator:
                 pass
         return list(_ALL_STAGES)
 
-    # ── Chapter execution ─────────────────────────────────────────────────────
+    # ── Batch execution ───────────────────────────────────────────────────────
 
-    def _run_chapter(self, chapter: dict, stages: list) -> None:
-        ch_id = chapter["id"]
-        self._emit("chapter_start",
-                   chapter_id=ch_id,
-                   chapter_index=chapter["chapter_index"],
-                   title=chapter["title"],
-                   stages=stages)
-
-        ch_t0 = time.time()
-
-        if "diarize" in stages:
-            self._stage_diarize(ch_id)
+    def _run_batch(self, batch: "list[_ChapterPlan]", results: dict) -> None:
+        """
+        Process one sub-batch through all three stages, loading each model at
+        most once. Error isolation is per chapter: a failure marks that chapter
+        'error' and drops it from later stages; the rest of the batch proceeds.
+        A stop() request halts the batch cleanly between chapters.
+        """
+        # ── Phase 1: diarize the whole batch under ONE LLM load ──────────────
+        diarize = [p for p in batch if "diarize" in p.stages]
+        if diarize and self._stop_event.is_set():
+            # Snapshot desktop VRAM once so the post-LLM barrier waits on the
+            # pipeline's delta, not memory held by the browser/compositor.
+            if self.cfg.vram_check_enabled:
+                self._vram_baseline_mb = _query_vram_used_mb()
+                if self._vram_baseline_mb >= 0:
+                    print(f"[orch] VRAM baseline before LLM: {self._vram_baseline_mb} MB.")
+            try:
+                llm_cfg = {"n_gpu_layers": self.cfg.llm_n_gpu_layers}
+                load_t0 = time.time()
+                with self._llm_cls(
+                    self.cfg.llm_model_path,
+                    self.sm,
+                    speakers=self.cfg.speakers,
+                    cfg=llm_cfg,
+                ) as director:
+                    # Cold-load cost is paid ONCE here and amortised over the
+                    # whole batch — logged so the per-chapter swap tax is visible.
+                    self._emit("model_load", model="llm",
+                               chapters=len(diarize),
+                               elapsed_s=round(time.time() - load_t0, 1))
+                    for p in diarize:
+                        self._pause_event.wait()
+                        if not self._stop_event.is_set():
+                            break
+                        self._ensure_started(p)
+                        try:
+                            p.elapsed += self._stage_diarize(director, p.chapter["id"])
+                        except Exception as exc:
+                            self._fail_chapter(p, "diarize", exc, results)
+            except Exception as exc:
+                # The model load itself failed — every chapter in this phase is
+                # blocked. Mark them all so the batch doesn't silently stall.
+                for p in diarize:
+                    if not p.errored:
+                        self._fail_chapter(p, "diarize", exc, results)
+            # LLM unloaded on context exit — wait for VRAM before TTS loads.
+            barrier_t0 = time.time()
             self._vram_barrier()
+            self._emit("vram_barrier",
+                       elapsed_s=round(time.time() - barrier_t0, 1))
 
-        if "synthesize" in stages:
-            self._stage_synthesize(ch_id)
+        # ── Phase 2: synthesize the whole batch under ONE TTS load ───────────
+        synth = [p for p in batch if "synthesize" in p.stages and not p.errored]
+        if synth and self._stop_event.is_set():
+            try:
+                load_t0 = time.time()
+                with self._tts_cls(
+                    self.sm,
+                    self.cfg.audio_wav_dir,
+                    model_dir=self.cfg.tts_model_dir,
+                ) as engine:
+                    self._emit("model_load", model="tts",
+                               chapters=len(synth),
+                               elapsed_s=round(time.time() - load_t0, 1))
+                    for p in synth:
+                        self._pause_event.wait()
+                        if not self._stop_event.is_set():
+                            break
+                        self._ensure_started(p)
+                        try:
+                            p.elapsed += self._stage_synthesize(engine, p.chapter["id"])
+                        except Exception as exc:
+                            self._fail_chapter(p, "synthesize", exc, results)
+            except Exception as exc:
+                for p in synth:
+                    if not p.errored:
+                        self._fail_chapter(p, "synthesize", exc, results)
 
-        if "assemble" in stages:
-            self._stage_assemble(ch_id)
+        # ── Phase 3: assemble on CPU (no model resident in VRAM) ─────────────
+        assemble = [p for p in batch if "assemble" in p.stages and not p.errored]
+        for p in assemble:
+            self._pause_event.wait()
+            if not self._stop_event.is_set():
+                break
+            self._ensure_started(p)
+            try:
+                p.elapsed += self._stage_assemble(p.chapter["id"])
+                self._complete_chapter(p, results)
+            except Exception as exc:
+                self._fail_chapter(p, "assemble", exc, results)
 
-        # Retrieve the finished audio path and record total processing time
+    # ── Per-chapter lifecycle helpers ─────────────────────────────────────────
+
+    def _ensure_started(self, p: "_ChapterPlan") -> None:
+        """Emit chapter_start exactly once, the first phase a chapter does work."""
+        if p.started:
+            return
+        p.started = True
+        ch = p.chapter
+        self._emit("chapter_start",
+                   chapter_id=ch["id"],
+                   chapter_index=ch["chapter_index"],
+                   title=ch["title"],
+                   stages=p.stages)
+
+    def _fail_chapter(self, p: "_ChapterPlan", stage: str,
+                      exc: Exception, results: dict) -> None:
+        p.errored = True
+        self._emit("chapter_error",
+                   chapter_id=p.chapter["id"],
+                   stage=stage,
+                   error=str(exc))
+        self.sm.mark_chapter_status(
+            p.chapter["id"], "error",
+            error_message=f"[failed_stage:{stage}] {exc}"
+        )
+        results["error"] += 1
+
+    def _complete_chapter(self, p: "_ChapterPlan", results: dict) -> None:
+        ch_id      = p.chapter["id"]
         ch_row     = self.sm.get_chapter_by_id(ch_id) or {}
         audio_path = ch_row.get("output_audio_path", "")
-        elapsed     = round(time.time() - ch_t0, 1)
-
+        elapsed    = round(p.elapsed, 1)
         self.sm.mark_chapter_status(ch_id, "complete", processing_seconds=elapsed)
-
         self._emit("chapter_done",
                    chapter_id=ch_id,
                    audio_path=audio_path,
                    elapsed_s=elapsed)
+        results["success"] += 1
 
     # ── Stage: LLM diarization ────────────────────────────────────────────────
 
-    def _stage_diarize(self, chapter_id: int) -> None:
+    def _stage_diarize(self, director, chapter_id: int) -> float:
+        """Diarize one chapter using an ALREADY-LOADED director. Returns elapsed s."""
         self._current_stage = "diarize"
         t0 = time.time()
         self._emit("stage_start", chapter_id=chapter_id, stage="diarize")
 
-        # Snapshot what the desktop already holds (browser, compositor, …) so
-        # the post-LLM barrier can wait on the pipeline's delta, not the total.
-        if self.cfg.vram_check_enabled:
-            self._vram_baseline_mb = _query_vram_used_mb()
-            if self._vram_baseline_mb >= 0:
-                print(f"[orch] VRAM baseline before LLM: {self._vram_baseline_mb} MB.")
+        director.process_chapter(chapter_id)
 
-        llm_cfg = {"n_gpu_layers": self.cfg.llm_n_gpu_layers}
-        with self._llm_cls(
-            self.cfg.llm_model_path,
-            self.sm,
-            speakers=self.cfg.speakers,
-            cfg=llm_cfg,
-        ) as director:
-            director.process_chapter(chapter_id)
-
-        # LLM context has exited here — VRAM purged by LLMDirector.__exit__
+        elapsed = round(time.time() - t0, 1)
         self._emit("stage_done", chapter_id=chapter_id, stage="diarize",
-                   elapsed_s=round(time.time() - t0, 1))
+                   elapsed_s=elapsed)
+        return elapsed
 
     # ── Stage: TTS synthesis ──────────────────────────────────────────────────
 
-    def _stage_synthesize(self, chapter_id: int) -> None:
+    def _stage_synthesize(self, engine, chapter_id: int) -> float:
+        """Synthesize one chapter using an ALREADY-LOADED engine. Returns elapsed s."""
         self._current_stage = "synthesize"
         t0 = time.time()
         self._emit("stage_start", chapter_id=chapter_id, stage="synthesize")
@@ -358,20 +480,17 @@ class PipelineOrchestrator:
                        speaker=line.get("speaker"),
                        emotion=line.get("emotion"))
 
-        with self._tts_cls(
-            self.sm,
-            self.cfg.audio_wav_dir,
-            model_dir=self.cfg.tts_model_dir,
-        ) as engine:
-            engine.process_chapter(chapter_id, progress_callback=_tts_progress)
+        engine.process_chapter(chapter_id, progress_callback=_tts_progress)
 
-        # TTS context has exited here — IndexTTS2 unloaded, VRAM freed
+        elapsed = round(time.time() - t0, 1)
         self._emit("stage_done", chapter_id=chapter_id, stage="synthesize",
-                   elapsed_s=round(time.time() - t0, 1))
+                   elapsed_s=elapsed)
+        return elapsed
 
     # ── Stage: Audio assembly ─────────────────────────────────────────────────
 
-    def _stage_assemble(self, chapter_id: int) -> None:
+    def _stage_assemble(self, chapter_id: int) -> float:
+        """Assemble one chapter's MP3 (CPU only). Returns elapsed s."""
         self._current_stage = "assemble"
         t0 = time.time()
         self._emit("stage_start", chapter_id=chapter_id, stage="assemble")
@@ -386,11 +505,13 @@ class PipelineOrchestrator:
         )
         asm.assemble_chapter(chapter_id)
 
+        elapsed = round(time.time() - t0, 1)
         self._emit("stage_done", chapter_id=chapter_id, stage="assemble",
-                   elapsed_s=round(time.time() - t0, 1))
+                   elapsed_s=elapsed)
 
         if self.cfg.cleanup_wavs:
             self._cleanup_chapter_wavs(chapter_id)
+        return elapsed
 
     # ── VRAM barrier ──────────────────────────────────────────────────────────
 
@@ -496,6 +617,12 @@ def _format_log_line(event: dict) -> str:
     if t == "stage_done":
         return (f"[{stamp}] CH {event.get('chapter_id', 0):04d} "
                 f"<< {event.get('stage')} ({event.get('elapsed_s')}s)")
+    if t == "model_load":
+        return (f"[{stamp}] LOAD {str(event.get('model')).upper()} "
+                f"({event.get('elapsed_s')}s) — amortised over "
+                f"{event.get('chapters')} chapter(s)")
+    if t == "vram_barrier":
+        return f"[{stamp}] VRAM BARRIER ({event.get('elapsed_s')}s)"
     if t == "vram_warning":
         return (f"[{stamp}] VRAM WARNING: {event.get('used_mb')} MB used "
                 f"(baseline {event.get('baseline_mb')} MB, "
@@ -527,6 +654,11 @@ def _log_event(event: dict) -> None:
     elif t == "stage_done":
         print(f"[orch] << Done:  {event.get('stage')} "
               f"in {event.get('elapsed_s')}s")
+    elif t == "model_load":
+        print(f"[orch] Loaded {event.get('model')} in {event.get('elapsed_s')}s "
+              f"(amortised over {event.get('chapters')} chapter(s))")
+    elif t == "vram_barrier":
+        print(f"[orch] VRAM barrier cleared in {event.get('elapsed_s')}s")
     elif t == "chapter_done":
         print(f"[orch] Chapter {event.get('chapter_id')} complete "
               f"({event.get('elapsed_s')}s) -> {event.get('audio_path')}")
