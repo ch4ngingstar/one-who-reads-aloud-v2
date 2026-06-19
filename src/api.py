@@ -45,6 +45,7 @@ from state_manager import StateManager, CHAPTER_STATUSES
 from orchestrator  import PipelineOrchestrator, PipelineConfig
 from epub_parser   import parse_epub
 from qa_audit      import audit_project, AuditConfig
+import diarization_io as dio
 
 
 # ── Pydantic request/response models ─────────────────────────────────────────
@@ -86,6 +87,17 @@ class ChapterResetRange(BaseModel):
     project_id:     int
     status_filter:  Optional[list[str]] = None   # e.g. ["error", "tts_done"]; None = all
     chapter_range:  Optional[list[int]] = None   # [start_index, end_index] inclusive; None = all
+
+
+class LabelEntry(BaseModel):
+    i:       int
+    speaker: str
+    emotion: str
+
+
+class LabelsImport(BaseModel):
+    chapter_id: Optional[int] = None   # echoed by exporter; path param is authoritative
+    labels:     list[LabelEntry]
 
 
 # ── Pipeline manager ──────────────────────────────────────────────────────────
@@ -481,6 +493,43 @@ async def list_chapter_lines(
     """All diarized lines for a chapter (speaker, text, emotion, status, audio_path)."""
     lines = sm.get_lines_for_chapter(chapter_id)
     return {"lines": lines, "total": len(lines)}
+
+
+@app.get("/api/chapters/{chapter_id}/segments")
+async def get_chapter_segments(
+    chapter_id: int,
+    sm: StateManager = Depends(get_sm),
+):
+    """Export a chapter's deterministic segments for external diarization.
+
+    Read-only. The formatter labels these by index; import re-derives the same
+    segments and applies labels by index (text is never trusted back)."""
+    try:
+        return dio.build_export(sm, chapter_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/chapters/{chapter_id}/labels")
+async def post_chapter_labels(
+    chapter_id: int,
+    payload: LabelsImport,
+    force: bool = False,
+    sm: StateManager = Depends(get_sm),
+):
+    """Import externally-produced speaker/emotion labels -> status 'diarized'."""
+    body = {"chapter_id": chapter_id,
+            "labels": [e.model_dump() for e in payload.labels]}
+    try:
+        n = dio.import_labels(sm, chapter_id, body, force=force)
+    except dio.ImportRejected as e:
+        msg = str(e)
+        if "past diarized" in msg:
+            raise HTTPException(status_code=409, detail=msg)
+        if "no chapter" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+    return {"chapter_id": chapter_id, "lines": n, "status": "diarized"}
 
 
 @app.delete("/api/chapters/{chapter_id}/audio")

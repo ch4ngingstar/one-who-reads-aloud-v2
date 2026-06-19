@@ -414,6 +414,78 @@ def test_sse_receives_event():
     print("  PASS test_sse_receives_event")
 
 
+# ── External diarization import (T6) ────────────────────────────────────────
+
+def _seed_one_chapter(sm, text):
+    """Seed a one-chapter project with a single chunk; return its chapter_id."""
+    book = {
+        "source_epub": "shadow_slave.epub",
+        "total_chapters": 1,
+        "chapters": [{
+            "chapter_index": 0,
+            "title": "Chapter 1",
+            "chunks": [{"chunk_index": 0, "text": text, "word_count": len(text.split())}],
+        }],
+    }
+    pid = sm.seed_project(book)
+    return sm.get_all_chapters(pid)[0]["id"]
+
+
+def test_get_chapter_segments():
+    client, sm, _ = _make_client()
+    ch_id = _seed_one_chapter(sm, '"Go," she said. He ran.')
+    r = client.get(f"/api/chapters/{ch_id}/segments")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["chapter_id"] == ch_id
+    assert [s["i"] for s in body["segments"]] == list(range(len(body["segments"])))
+    print("  PASS test_get_chapter_segments")
+
+
+def test_get_chapter_segments_unknown():
+    client, sm, _ = _make_client()
+    r = client.get("/api/chapters/999/segments")
+    assert r.status_code == 404, r.text
+    print("  PASS test_get_chapter_segments_unknown")
+
+
+def test_post_chapter_labels_imports():
+    client, sm, _ = _make_client()
+    ch_id = _seed_one_chapter(sm, "The hall was silent.")
+    segs = client.get(f"/api/chapters/{ch_id}/segments").json()["segments"]
+    body = {"chapter_id": ch_id,
+            "labels": [{"i": s["i"], "speaker": "Narrator", "emotion": "calm"}
+                       for s in segs]}
+    r = client.post(f"/api/chapters/{ch_id}/labels", json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "diarized"
+    assert sm.get_chapter_by_id(ch_id)["status"] == "diarized"
+    print("  PASS test_post_chapter_labels_imports")
+
+
+def test_post_chapter_labels_conflict_past_diarized():
+    client, sm, _ = _make_client()
+    ch_id = _seed_one_chapter(sm, "The hall was silent.")
+    segs = client.get(f"/api/chapters/{ch_id}/segments").json()["segments"]
+    body = {"chapter_id": ch_id,
+            "labels": [{"i": s["i"], "speaker": "Narrator", "emotion": "calm"}
+                       for s in segs]}
+    client.post(f"/api/chapters/{ch_id}/labels", json=body)
+    sm.mark_chapter_status(ch_id, "complete")
+    r = client.post(f"/api/chapters/{ch_id}/labels", json=body)
+    assert r.status_code == 409, r.text
+    print("  PASS test_post_chapter_labels_conflict_past_diarized")
+
+
+def test_post_chapter_labels_stale_rejected():
+    client, sm, _ = _make_client()
+    ch_id = _seed_one_chapter(sm, "The hall was silent.")
+    body = {"chapter_id": ch_id, "labels": []}  # zero labels, >=1 segment -> stale
+    r = client.post(f"/api/chapters/{ch_id}/labels", json=body)
+    assert r.status_code == 400, r.text
+    print("  PASS test_post_chapter_labels_stale_rejected")
+
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
 def _cleanup():
@@ -448,6 +520,11 @@ TESTS = [
     test_audio_not_found,
     test_audio_serves_file,
     test_sse_receives_event,
+    test_get_chapter_segments,
+    test_get_chapter_segments_unknown,
+    test_post_chapter_labels_imports,
+    test_post_chapter_labels_conflict_past_diarized,
+    test_post_chapter_labels_stale_rejected,
 ]
 
 if __name__ == "__main__":
