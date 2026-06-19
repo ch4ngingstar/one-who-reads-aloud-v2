@@ -424,6 +424,79 @@ def test_emotion_override_voice_used():
     print("  PASS test_emotion_override_voice_used")
 
 
+# ── Speaker-grouped synthesis order (cache-friendly) ──────────────────────────
+
+def test_group_by_speaker_minimizes_ref_switches():
+    """Alternating dialogue must be synthesised grouped by reference so the
+    IndexTTS2 conditioning cache hits; output WAVs stay keyed by line_index."""
+    sm = _tmp_sm()
+    ref_a = _tmp_wav()
+    ref_b = _tmp_wav()
+    sm.set_voice("Sunny",    str(ref_a))
+    sm.set_voice("Narrator", str(ref_b))
+
+    # A,B,A,B,A,B in line order -> 5 ref switches if synthesised in line order.
+    ch_id = _seed_diarized_chapter(sm, [
+        {"line_index": 0, "speaker": "Sunny",    "text": "one",   "emotion": "neutral"},
+        {"line_index": 1, "speaker": "Narrator", "text": "two",   "emotion": "neutral"},
+        {"line_index": 2, "speaker": "Sunny",    "text": "three", "emotion": "neutral"},
+        {"line_index": 3, "speaker": "Narrator", "text": "four",  "emotion": "neutral"},
+        {"line_index": 4, "speaker": "Sunny",    "text": "five",  "emotion": "neutral"},
+        {"line_index": 5, "speaker": "Narrator", "text": "six",   "emotion": "neutral"},
+    ])
+
+    used_refs = []
+    def capture(text, ref, emo_vector=None, emo_alpha=0.0):
+        used_refs.append(ref)
+        return _wav_silence()
+
+    with tempfile.TemporaryDirectory() as out_dir:
+        engine = _make_engine(sm, out_dir, mock_synth=capture)
+        n = engine.process_chapter(ch_id)
+        # All six lines still produced, named by line_index.
+        assert n == 6
+        for i in range(6):
+            assert (Path(out_dir) / f"ch_{ch_id:04d}" / f"line_{i:04d}.wav").exists()
+
+    # Count reference switches: grouped order -> exactly 1 switch (A...A then B...B).
+    switches = sum(1 for i in range(1, len(used_refs)) if used_refs[i] != used_refs[i - 1])
+    assert switches == 1, f"expected 1 ref switch when grouped, got {switches}: {used_refs}"
+
+    ref_a.unlink(missing_ok=True)
+    ref_b.unlink(missing_ok=True)
+    print("  PASS test_group_by_speaker_minimizes_ref_switches")
+
+
+def test_group_by_speaker_off_preserves_line_order():
+    """With grouping disabled, synthesis follows strict line order."""
+    sm = _tmp_sm()
+    ref_a = _tmp_wav()
+    ref_b = _tmp_wav()
+    sm.set_voice("Sunny",    str(ref_a))
+    sm.set_voice("Narrator", str(ref_b))
+
+    ch_id = _seed_diarized_chapter(sm, [
+        {"line_index": 0, "speaker": "Sunny",    "text": "one", "emotion": "neutral"},
+        {"line_index": 1, "speaker": "Narrator", "text": "two", "emotion": "neutral"},
+        {"line_index": 2, "speaker": "Sunny",    "text": "three", "emotion": "neutral"},
+    ])
+
+    used_refs = []
+    def capture(text, ref, emo_vector=None, emo_alpha=0.0):
+        used_refs.append(ref)
+        return _wav_silence()
+
+    with tempfile.TemporaryDirectory() as out_dir:
+        engine = _make_engine(sm, out_dir, mock_synth=capture)
+        engine.cfg["group_by_speaker"] = False
+        engine.process_chapter(ch_id)
+
+    assert used_refs == [str(ref_a), str(ref_b), str(ref_a)], used_refs
+    ref_a.unlink(missing_ok=True)
+    ref_b.unlink(missing_ok=True)
+    print("  PASS test_group_by_speaker_off_preserves_line_order")
+
+
 # ── _split_long_line tests ────────────────────────────────────────────────────
 
 def test_split_short_line_unchanged():
@@ -612,6 +685,8 @@ TESTS = [
     test_process_chapter_empty_no_crash,
     test_process_chapter_uses_default_fallback,
     test_emotion_override_voice_used,
+    test_group_by_speaker_minimizes_ref_switches,
+    test_group_by_speaker_off_preserves_line_order,
     test_split_short_line_unchanged,
     test_split_at_sentence_boundary,
     test_split_single_oversized_sentence_hard_split,
