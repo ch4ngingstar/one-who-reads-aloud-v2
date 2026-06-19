@@ -227,12 +227,6 @@ _DEFAULT_CFG = {
     "max_text_tokens_per_segment": 200,
     "num_beams":      3,
     "db_flush_every": 10,   # write tts_done updates to DB every N lines (resume granularity)
-    # Synthesise lines grouped by resolved reference audio. IndexTTS2 caches the
-    # speaker conditioning for the LAST spk_audio_prompt only, so alternating
-    # dialogue recomputes it every turn; grouping makes that cache hit on every
-    # line after a speaker's first. Output is identical (WAVs keyed by line_index,
-    # assembled in line order) — set False to synthesise in strict line order.
-    "group_by_speaker": True,
 }
 
 
@@ -455,26 +449,12 @@ class TTSEngine:
         _pending_db: list[tuple[int, str]] = []
         print(f"[tts] Synthesising {total} lines for chapter {chapter_id}...")
 
-        # Resolve each line's reference audio ONCE, then (optionally) synthesise
-        # grouped by that reference so IndexTTS2's single-entry speaker-conditioning
-        # cache (keyed on spk_audio_prompt) hits on every line after a speaker's
-        # first, instead of thrashing on every dialogue turn. WAVs are named by
-        # line_index and assembled in line order, so synthesis order does not
-        # change the final audio — only how often conditioning is recomputed.
-        resolved = [
-            (ln, self._resolve_ref_audio(ln["speaker"], ln["emotion"], voice_map))
-            for ln in lines
-        ]
-        if self.cfg["group_by_speaker"]:
-            # Unmappable (None) refs sort last (False < True); line_index keeps
-            # order deterministic and resume-stable within each group.
-            resolved.sort(key=lambda pair: (pair[1] is None,
-                                            pair[1] or "",
-                                            pair[0]["line_index"]))
-
-        for processed, (line, ref_path) in enumerate(resolved, start=1):
+        for processed, line in enumerate(lines, start=1):
             audio_path = ch_dir / f"line_{line['line_index']:04d}.wav"
 
+            ref_path = self._resolve_ref_audio(
+                line["speaker"], line["emotion"], voice_map
+            )
             if ref_path is None:
                 self.sm.mark_line_failed(
                     line["id"],

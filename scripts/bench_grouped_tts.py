@@ -1,11 +1,15 @@
-"""Measure the speaker-grouped synthesis win (IndexTTS2 conditioning-cache reuse).
+"""Measure whether speaker-grouped synthesis beats line-order (it does NOT).
 
 IndexTTS2 caches the speaker conditioning for the LAST spk_audio_prompt only, so
-alternating dialogue (A,B,A,B…) recomputes that costly conditioning on every
-turn. tts_engine now synthesises lines grouped by reference audio so the cache
-hits on every line after a speaker's first. This script times a real chapter's
-lines synthesised in LINE order vs GROUPED order on YOUR GPU and reports the
-speedup — the magnitude depends on how dialogue-interleaved the chapter is.
+the hypothesis was that synthesising a chapter's lines grouped by reference audio
+(so the cache hits instead of thrashing on dialogue) would be faster. This script
+times a real chapter's lines in LINE order vs GROUPED order on the GPU.
+
+FINDING (2026-06-19, RTX 4070, vol9 ch264, 32 lines / 17 ref switches): grouped
+was 0.92x — i.e. SLOWER. At ~8.4s/line, synthesis is dominated by IndexTTS2's
+autoregressive token generation, not the conditioning recompute, so eliminating
+16 of 17 recomputes saved nothing measurable (the gap is run-order/thermal noise).
+Conclusion: grouping was not shipped. Kept as the reusable evidence/benchmark.
 
 Read-only: it never writes WAVs into the pipeline tree or touches the DB status.
 It loads IndexTTS2 once and synthesises to throwaway temp files.
