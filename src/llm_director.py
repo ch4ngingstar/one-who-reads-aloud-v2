@@ -335,6 +335,61 @@ def _is_narrator_misattribution(speaker: str, text: str) -> bool:
     return False
 
 
+def enforce_labels(
+    segments: "list[dict]",
+    labels: "dict[int, tuple[str, str]]",
+    allowed: "set[str]",
+    line_offset: int = 0,
+) -> "list[dict]":
+    """Apply structural speaker enforcement and produce final line dicts.
+
+    Shared by the LLM path (LLMDirector._merge_labels) and the external
+    diarization importer (diarization_io) so both self-heal identically:
+    prose -> Narrator (except genuine Sunny inner monologue), thought ->
+    POV/Sunny, system -> roster-or-Spell, dialogue != Narrator -> Unknown,
+    bad emotion -> neutral.
+    """
+    lines: list[dict] = []
+    for seg in segments:
+        speaker, emotion = labels[seg["index"]]
+        kind, text = seg["kind"], seg["text"]
+
+        if kind == KIND_PROSE:
+            # Prose is Narrator -- except Sunny inner monologue that genuinely
+            # reads first-person (italics don't survive EPUB parsing, so this
+            # is the only inner-monologue signal left).
+            if not (speaker == "Sunny"
+                    and not _is_narrator_misattribution("Sunny", text)):
+                if speaker != "Narrator":
+                    print(f"[llm]   FIX  prose '{speaker}' -> Narrator | {text[:60]!r}")
+                speaker = "Narrator"
+        elif kind == KIND_THOUGHT:
+            # Quote marks are the structural evidence here -- it IS a thought,
+            # even when it mentions others in third person. Trust the POV-character
+            # pick; only repair impossible labels.
+            if speaker not in allowed or speaker == SYSTEM_SPEAKER:
+                speaker = "Sunny"
+        elif kind == KIND_SYSTEM:
+            # Brackets carry Spell notifications AND telepathic rune messages --
+            # keep any valid roster label, default to the Spell only when impossible.
+            if speaker not in allowed:
+                speaker = SYSTEM_SPEAKER
+        else:  # dialogue
+            if speaker not in allowed or speaker == "Narrator":
+                speaker = "Unknown"
+
+        if emotion not in EMOTION_VOCAB:
+            emotion = "neutral"
+
+        lines.append({
+            "line_index": line_offset + len(lines),
+            "speaker":    speaker,
+            "text":       text,
+            "emotion":    emotion,
+        })
+    return lines
+
+
 # ── LLM Director ──────────────────────────────────────────────────────────────
 
 class LLMDirector:
@@ -468,46 +523,7 @@ class LLMDirector:
         line_offset: int,
     ) -> "list[dict]":
         """Apply structural speaker enforcement and produce final line dicts."""
-        lines: list[dict] = []
-        for seg in segments:
-            speaker, emotion = labels[seg["index"]]
-            kind, text = seg["kind"], seg["text"]
-
-            if kind == KIND_PROSE:
-                # Prose is Narrator -- except Sunny inner monologue that genuinely
-                # reads first-person (italics don't survive EPUB parsing, so this
-                # is the only inner-monologue signal left).
-                if not (speaker == "Sunny"
-                        and not _is_narrator_misattribution("Sunny", text)):
-                    if speaker != "Narrator":
-                        print(f"[llm]   FIX  prose '{speaker}' -> Narrator | {text[:60]!r}")
-                    speaker = "Narrator"
-            elif kind == KIND_THOUGHT:
-                # Quote marks are the structural evidence here -- it IS a thought,
-                # even when it mentions others in third person. Trust the LLM's
-                # POV-character pick; only repair impossible labels.
-                if speaker not in self._allowed or speaker == SYSTEM_SPEAKER:
-                    speaker = "Sunny"
-            elif kind == KIND_SYSTEM:
-                # Brackets carry Spell notifications AND telepathic rune messages
-                # between characters -- keep any valid roster label, default to
-                # the Spell only when the label is impossible.
-                if speaker not in self._allowed:
-                    speaker = SYSTEM_SPEAKER
-            else:  # dialogue
-                if speaker not in self._allowed or speaker == "Narrator":
-                    speaker = "Unknown"
-
-            if emotion not in EMOTION_VOCAB:
-                emotion = "neutral"
-
-            lines.append({
-                "line_index": line_offset + len(lines),
-                "speaker":    speaker,
-                "text":       text,
-                "emotion":    emotion,
-            })
-        return lines
+        return enforce_labels(segments, labels, self._allowed, line_offset)
 
     def _fallback_lines(self, segments: "list[dict]", line_offset: int) -> "list[dict]":
         """Total-failure fallback: sensible per-kind defaults, all text preserved."""
