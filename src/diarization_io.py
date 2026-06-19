@@ -35,3 +35,38 @@ def segment_chapter(sm, chapter_id: int) -> "list[dict]":
                 "text":  seg["text"],
             })
     return segments
+
+
+def _roster(speakers: "list[str] | None" = None) -> "list[str]":
+    spk = speakers if speakers is not None else DEFAULT_SPEAKERS
+    return ["Narrator", *spk, "Unknown", "The Nightmare Spell"]
+
+
+def build_export(sm, chapter_id: int,
+                 speakers: "list[str] | None" = None) -> dict:
+    """Read-only export payload for one chapter (see design doc format)."""
+    chapter = sm.get_chapter_by_id(chapter_id)
+    if chapter is None:
+        raise ValueError(f"No chapter with id={chapter_id}")
+
+    segments = segment_chapter(sm, chapter_id)
+    return {
+        "chapter_id":    chapter_id,
+        "chapter_index": chapter["chapter_index"],
+        "title":         chapter["title"],
+        "speakers":      _roster(speakers),
+        "segments": [
+            {"i": s["index"], "kind": s["kind"], "text": s["text"]}
+            for s in segments
+        ],
+    }
+
+
+def build_system_prompt_text(speakers: "list[str] | None" = None) -> str:
+    """The instruction block an external formatter (cloud LLM / human) needs.
+
+    Reuses the exact local system prompt (roster + emotion vocab + per-kind
+    rules + output schema) so external labels match what enforce_labels accepts.
+    """
+    spk = speakers if speakers is not None else DEFAULT_SPEAKERS
+    return _build_system_prompt(spk)

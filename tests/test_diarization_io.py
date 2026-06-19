@@ -52,8 +52,50 @@ def test_segment_chapter_global_indices():
     print("  PASS test_segment_chapter_global_indices")
 
 
+# ── T3: build_export + system prompt ────────────────────────────────────────
+
+def test_build_export_payload():
+    sm = _tmp_sm()
+    _, ch_id = _seed_chapter(sm, ['"We move at dawn." Nephis turned away.'])
+    payload = dio.build_export(sm, ch_id)
+
+    assert payload["chapter_id"] == ch_id
+    assert payload["chapter_index"] == 7
+    assert payload["title"] == "Chapter 7"
+    assert "Narrator" in payload["speakers"] and "Unknown" in payload["speakers"]
+    assert payload["speakers"][0] == "Narrator"
+    segs = payload["segments"]
+    assert [s["i"] for s in segs] == list(range(len(segs)))
+    assert all({"i", "kind", "text"} == set(s) for s in segs)
+    # text is verbatim-from-EPUB (a known fragment survives)
+    assert any("We move at dawn" in s["text"] for s in segs)
+    print("  PASS test_build_export_payload")
+
+
+def test_build_export_unknown_chapter_raises():
+    sm = _tmp_sm()
+    try:
+        dio.build_export(sm, 999)
+        assert False, "expected ValueError for unknown chapter"
+    except ValueError:
+        pass
+    print("  PASS test_build_export_unknown_chapter_raises")
+
+
+def test_system_prompt_text_has_roster_and_schema():
+    txt = dio.build_system_prompt_text()
+    assert "Narrator" in txt and "Unknown" in txt
+    assert '"labels"' in txt and '"speaker"' in txt and '"emotion"' in txt
+    for emo in EMOTION_VOCAB:
+        assert emo in txt
+    print("  PASS test_system_prompt_text_has_roster_and_schema")
+
+
 TESTS = [
     test_segment_chapter_global_indices,
+    test_build_export_payload,
+    test_build_export_unknown_chapter_raises,
+    test_system_prompt_text_has_roster_and_schema,
 ]
 
 
