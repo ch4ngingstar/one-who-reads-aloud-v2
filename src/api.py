@@ -44,6 +44,7 @@ from pydantic import BaseModel
 from state_manager import StateManager, CHAPTER_STATUSES
 from orchestrator  import PipelineOrchestrator, PipelineConfig
 from epub_parser   import parse_epub
+from qa_audit      import audit_project, AuditConfig
 
 
 # ── Pydantic request/response models ─────────────────────────────────────────
@@ -388,6 +389,30 @@ async def list_chapters(
     if not chapters:
         raise HTTPException(status_code=404, detail="No chapters found.")
     return {"chapters": chapters, "total": len(chapters)}
+
+
+@app.get("/api/qa/audit")
+async def qa_audit_endpoint(
+    project_id: int,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    sm: StateManager = Depends(get_sm),
+):
+    """Read-only correctness audit. Flags suspect chapters/lines without
+    mutating anything. Optional inclusive chapter_index range via start/end."""
+    rng = None
+    if start is not None or end is not None:
+        if start is None or end is None:
+            raise HTTPException(status_code=400,
+                                detail="Provide both 'start' and 'end', or neither.")
+        if start > end:
+            raise HTTPException(status_code=400, detail="'start' must be <= 'end'.")
+        rng = (start, end)
+    try:
+        report = audit_project(sm, project_id, AuditConfig(), chapter_range=rng)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return report.to_dict()
 
 
 @app.post("/api/chapters/reset-range", status_code=200)

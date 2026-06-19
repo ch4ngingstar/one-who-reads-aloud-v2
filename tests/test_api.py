@@ -127,6 +127,39 @@ def test_list_chapters_not_found():
     print("  PASS test_list_chapters_not_found")
 
 
+def test_qa_audit_endpoint():
+    sm = _tmp_sm()
+    pid = _seed_project(sm, n_chapters=2)
+    # Force one chapter into error so the audit has something to report.
+    cid = sm.get_all_chapters(pid)[0]["id"]
+    sm.mark_chapter_status(cid, "error", error_message="boom")
+    client, _, _ = _make_client(sm=sm)
+
+    r = client.get(f"/api/qa/audit?project_id={pid}")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["summary"]["chapters_audited"] == 2
+    assert any(f["code"] == "chapter_error" for f in data["findings"])
+    print("  PASS test_qa_audit_endpoint")
+
+
+def test_qa_audit_unknown_project():
+    sm = _tmp_sm()
+    client, _, _ = _make_client(sm=sm)
+    r = client.get("/api/qa/audit?project_id=9999")
+    assert r.status_code == 404
+    print("  PASS test_qa_audit_unknown_project")
+
+
+def test_qa_audit_bad_range():
+    sm = _tmp_sm()
+    pid = _seed_project(sm, n_chapters=2)
+    client, _, _ = _make_client(sm=sm)
+    r = client.get(f"/api/qa/audit?project_id={pid}&start=5")  # end missing
+    assert r.status_code == 400
+    print("  PASS test_qa_audit_bad_range")
+
+
 def test_get_voices_empty():
     client, _, _ = _make_client()
     r = client.get("/api/voices")
@@ -396,6 +429,9 @@ TESTS = [
     test_create_project_epub_not_found,
     test_list_chapters,
     test_list_chapters_not_found,
+    test_qa_audit_endpoint,
+    test_qa_audit_unknown_project,
+    test_qa_audit_bad_range,
     test_get_voices_empty,
     test_set_voice_bad_path,
     test_set_and_get_voice,
