@@ -187,6 +187,25 @@ def test_resolve_ref_audio_falls_back_to_primary():
     print("  PASS test_resolve_ref_audio_falls_back_to_primary")
 
 
+def test_resolve_ref_audio_alias_master_sunless_to_sunny():
+    # Sunny's enchanter disguise "Master Sunless" must speak in Sunny's voice,
+    # not fall back to the default. Locks in the SPEAKER_ALIASES decision.
+    voice_map = {"Sunny": "/voices/sunny.wav", "_default": "/voices/default.wav"}
+    result = TTSEngine._resolve_ref_audio("Master Sunless", "neutral", voice_map)
+    assert result == "/voices/sunny.wav", f"Got: {result}"
+    print("  PASS test_resolve_ref_audio_alias_master_sunless_to_sunny")
+
+
+def test_resolve_ref_audio_alias_normalizes_case():
+    # Raw speaker strings are strip()+title()-normalised before the alias lookup,
+    # so messy casing/whitespace still resolves through SPEAKER_ALIASES.
+    voice_map = {"Sunny": "/voices/sunny.wav", "_default": "/voices/default.wav"}
+    for raw in ("  master sunless ", "MASTER SUNLESS", "Master Sunless"):
+        result = TTSEngine._resolve_ref_audio(raw, "neutral", voice_map)
+        assert result == "/voices/sunny.wav", f"{raw!r} -> {result}"
+    print("  PASS test_resolve_ref_audio_alias_normalizes_case")
+
+
 def test_resolve_ref_audio_missing_returns_none():
     result = TTSEngine._resolve_ref_audio("UnknownChar", "neutral", {})
     assert result is None
@@ -634,6 +653,8 @@ TESTS = [
     test_resolve_ref_audio_primary,
     test_resolve_ref_audio_emotion_override,
     test_resolve_ref_audio_falls_back_to_primary,
+    test_resolve_ref_audio_alias_master_sunless_to_sunny,
+    test_resolve_ref_audio_alias_normalizes_case,
     test_resolve_ref_audio_missing_returns_none,
     test_resolve_ref_audio_falls_back_to_default,
     test_resolve_ref_audio_dict_entry,
