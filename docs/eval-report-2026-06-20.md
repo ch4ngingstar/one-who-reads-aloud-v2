@@ -74,10 +74,42 @@ attributed names; top real characters:
 Action (Phase 2, pending your confirm): add confirmed characters to `DEFAULT_SPEAKERS` /
 `SPEAKER_ALIASES` and register voice clips.
 
+## 5. Formatting / diarization accuracy — **STRONG, gold is a candidate**
+
+`scripts/eval_formatting.py` vs an independent gold label set (`tests/data/gold/ch_264.json`,
+ch 264 "Talking to Myself", 64 lines). Gold was hand-labeled from the segmenter text **blind
+to the diarizer output** — the "stronger-LLM reference" step the plan calls for — and is a
+**candidate pending your spot-correction** of the flagged ambiguities in the file.
+
+| Metric | Value |
+|--------|-------|
+| Segmentation 1:1 (Pass 1 byte-exact) | **64/64** — 0 missing either side ✅ |
+| Speaker-label accuracy | **96.9%** (62/64) |
+| Emotion-label accuracy | **82.8%** (53/64) |
+| TTS resolution of predicted labels | 64/64 **mapped**, 0 unmapped, 0 fallback |
+
+**Speaker (96.9%)** — both disagreements are genuine *ambiguities*, not clear errors:
+- **L11** (gold Sunny / pred Narrator): "Was now a good time to establish a distinction…" —
+  free-indirect inner thought vs prose. Defensible either way.
+- **L17** (gold Sunny / pred Nephis): who *introduces* Saint Shadow ↔ Master Sunless to each
+  other. The diarizer's Nephis is plausibly correct (she's the Lady making the introduction);
+  this may be a gold error to spot-correct. Chief structural challenge of this chapter — Sunny
+  conversing with himself across two incarnations, both collapsed to `Sunny`.
+
+**Emotion (82.8%)** — mostly subjective tone calls (cold↔sarcastic, neutral↔pleading). The
+diarizer is rule-consistent: it maps questions → `confused` (L25/L58/L11), which the prompt's
+emotion guide literally instructs. **One clear miss worth a fix:** **L55** — the prose says
+Nephis *"whispered into his ear"* yet the line was labeled `cold`, not `whispers`. The emotion
+guide already says "hushed speech → whispers"; the cue is in the *previous* prose segment, so
+the LLM isn't carrying that context onto the dialogue line. Candidate Phase-2 prompt tweak.
+
 ---
 
 ## Verdict
 
-- **Accuracy and voice identity are solid** — no work needed.
-- **The two real levers are emotion balance (#3) and roster coverage (#4).**
-- Both Phase-2 changes are gated: emotion on your listening verdict, roster on your character confirm.
+- **Accuracy, voice identity, and formatting are all solid** — segmentation is perfect, speaker
+  attribution ~97% with only true ambiguities left, emotion labeling rule-consistent.
+- **The real levers are emotion-vector balance (#3) and roster coverage (#4)**; formatting (#5)
+  needs only a small prompt nudge (carry "whispered/hushed" prose cues onto the next dialogue line).
+- Gates: emotion-vector retune on your listening verdict; roster on your character confirm;
+  **formatting gold (#5) on your spot-correction of the flagged lines (esp. L17).**
