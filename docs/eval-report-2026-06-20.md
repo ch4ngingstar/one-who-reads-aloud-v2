@@ -74,42 +74,54 @@ attributed names; top real characters:
 Action (Phase 2, pending your confirm): add confirmed characters to `DEFAULT_SPEAKERS` /
 `SPEAKER_ALIASES` and register voice clips.
 
-## 5. Formatting / diarization accuracy — **STRONG, gold is a candidate**
+## 5. Formatting / diarization accuracy — **TWO gold chapters, real bugs surfaced**
 
-`scripts/eval_formatting.py` vs an independent gold label set (`tests/data/gold/ch_264.json`,
-ch 264 "Talking to Myself", 64 lines). Gold was hand-labeled from the segmenter text **blind
-to the diarizer output** — the "stronger-LLM reference" step the plan calls for — and is a
-**candidate pending your spot-correction** of the flagged ambiguities in the file.
+`scripts/eval_formatting.py` vs independent gold label sets, hand-labeled from the segmenter
+text **blind to the diarizer output** (the plan's "stronger-LLM reference" step). Both are
+**candidates pending your spot-correction** (ambiguities flagged in each JSON's `_meta`).
 
-| Metric | Value |
-|--------|-------|
-| Segmentation 1:1 (Pass 1 byte-exact) | **64/64** — 0 missing either side ✅ |
-| Speaker-label accuracy | **96.9%** (62/64) |
-| Emotion-label accuracy | **82.8%** (53/64) |
-| TTS resolution of predicted labels | 64/64 **mapped**, 0 unmapped, 0 fallback |
+| Chapter | Lines | Speaker acc | Emotion acc | Notes |
+|---------|-------|-------------|-------------|-------|
+| `ch_264` "Talking to Myself" | 64 | **98.4%** | 82.8% | Sunny-heavy monologue; clean |
+| `ch_255` "First Blood" | 72 | **81.9%** | 86.1% | 6 speakers; exposed 2 bugs (below) |
+| **Combined** | 136 | **89.7%** (122/136) | **84.6%** (115/136) | |
 
-**Speaker (96.9%)** — both disagreements are genuine *ambiguities*, not clear errors:
-- **L11** (gold Sunny / pred Narrator): "Was now a good time to establish a distinction…" —
-  free-indirect inner thought vs prose. Defensible either way.
-- **L17** (gold Sunny / pred Nephis): who *introduces* Saint Shadow ↔ Master Sunless to each
-  other. The diarizer's Nephis is plausibly correct (she's the Lady making the introduction);
-  this may be a gold error to spot-correct. Chief structural challenge of this chapter — Sunny
-  conversing with himself across two incarnations, both collapsed to `Sunny`.
+Segmentation was 1:1 with gold on both (Pass-1 byte-exact holds).
 
-**Emotion (82.8%)** — mostly subjective tone calls (cold↔sarcastic, neutral↔pleading). The
-diarizer is rule-consistent: it maps questions → `confused` (L25/L58/L11), which the prompt's
-emotion guide literally instructs. **One clear miss worth a fix:** **L55** — the prose says
-Nephis *"whispered into his ear"* yet the line was labeled `cold`, not `whispers`. The emotion
-guide already says "hushed speech → whispers"; the cue is in the *previous* prose segment, so
-the LLM isn't carrying that context onto the dialogue line. Candidate Phase-2 prompt tweak.
+**What ch_264 alone hid, ch_255 revealed** — labeling a 2nd chapter paid off:
+
+1. **Eval tooling bug (FIXED):** `compare_labels` compared raw speaker strings, so the diarizer
+   naming Tyris by her epithets ("Sky Tide", "Saint Tyris" — both already `SPEAKER_ALIASES` →
+   `Tyris`) scored as 4 *false* errors. Now the evaluator normalises speakers through
+   `SPEAKER_ALIASES` before comparing (mirrors TTS resolution). This alone lifted ch_255 speaker
+   accuracy 76.4% → **81.9%**. The diarizer had correctly identified the character all along.
+2. **Segmentation duplication (ch_255 only, likely source-text):** 5 adjacent line-pairs are
+   byte-identical dialogue (L29≈30, 32≈33, 34≈35, 37≈38, 40≈41, plus merged-prose 44/45, 47/48),
+   i.e. **the audiobook would speak these lines twice**. ch_264/257/259/254 have 0 such pairs, so
+   it is *not* systemic — investigate the ch-1842 source EPUB / `segmenter.py` merge of
+   `"X said: <dialogue>"` attribution. The diarizer reasonably tags the prose-led first copy as
+   `Narrator`, which accounts for most of ch_255's remaining gap (Tyris/Sunny/Nephis→Narrator).
+3. **Genuine diarizer error (small):** L12/L13 — a two-line Sunny↔Nephis exchange got swapped
+   (alternation tracked off-by-one). This is the only clear attribution fault, ~1-2 lines.
+
+**Cross-validation bonus:** ch_255 L28-29 ("Nephis nodded curtly" → "This is Master Sunless…")
+proved that introduction is **Nephis**, so ch_264's diarizer was right on L17 — **ch_264 gold
+L17 corrected Sunny → Nephis** (hence 96.9% → 98.4%).
+
+**Emotion (84.6% combined)** — mostly subjective (cold↔sarcastic, neutral↔pleading); the
+emotion vector is a soft prosody nudge so these barely matter audibly. Two *systematic* patterns
+remain as candidate Phase-2 prompt tweaks (need a GPU re-run to verify): over-eager
+`question → confused`, and prose manner-cues ("whispered into his ear", ch_264 L55) not carried
+onto the adjacent dialogue line.
 
 ---
 
 ## Verdict
 
-- **Accuracy, voice identity, and formatting are all solid** — segmentation is perfect, speaker
-  attribution ~97% with only true ambiguities left, emotion labeling rule-consistent.
-- **The real levers are emotion-vector balance (#3) and roster coverage (#4)**; formatting (#5)
-  needs only a small prompt nudge (carry "whispered/hushed" prose cues onto the next dialogue line).
-- Gates: emotion-vector retune on your listening verdict; roster on your character confirm;
-  **formatting gold (#5) on your spot-correction of the flagged lines (esp. L17).**
+- **Speaker attribution is strong** — ch_264 98.4%, ch_255 81.9% where the gap is ~half data
+  artifact (duplication) + tooling (now fixed), with only ~1-2 genuine diarizer errors.
+- **The biggest real "accuracy" win was a measurement fix** (alias-normalisation in the eval),
+  plus surfacing the **ch_255 duplication bug** (audible — worth fixing upstream).
+- Emotion accuracy is fine and low-stakes; prompt tweaks are optional and GPU-gated.
+- Gates: emotion-vector retune + emotion prompt tweaks on your ear/GPU; gold spot-correction on
+  the flagged lines; **decide whether to chase the ch_255 segmentation duplication.**

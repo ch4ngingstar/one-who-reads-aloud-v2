@@ -48,8 +48,26 @@ def labels_from_db(sm, chapter_id: int) -> dict:
             for ln in sm.get_lines_for_chapter(chapter_id)}
 
 
+def _norm_speaker(name: str) -> str:
+    """Normalise a speaker label the SAME way TTSEngine._resolve_ref_audio does
+    (strip + Title Case + SPEAKER_ALIASES remap), so epithet/alias variants that
+    resolve to the same voice are scored as correct rather than confusions.
+    e.g. diarizer 'Sky Tide'/'Saint Tyris' == gold 'Tyris'."""
+    try:
+        from tts_engine import SPEAKER_ALIASES
+    except Exception:
+        SPEAKER_ALIASES = {}
+    normalised = (name or "").strip().title()
+    return SPEAKER_ALIASES.get(normalised, normalised)
+
+
 def compare_labels(pred: dict, gold: dict) -> dict:
-    """Speaker/emotion accuracy + confusion + mismatches over the shared indices."""
+    """Speaker/emotion accuracy + confusion + mismatches over the shared indices.
+
+    Speakers are compared after SPEAKER_ALIASES normalisation (an alias that
+    resolves to the same voice is not a real attribution error). Raw labels are
+    still shown in the mismatch/confusion output for traceability.
+    """
     shared = sorted(set(pred) & set(gold))
     missing_in_pred = sorted(set(gold) - set(pred))
     missing_in_gold = sorted(set(pred) - set(gold))
@@ -59,7 +77,8 @@ def compare_labels(pred: dict, gold: dict) -> dict:
     for i in shared:
         gs, ge = gold[i]
         ps, pe = pred[i]
-        if ps == gs:
+        sp_match = _norm_speaker(ps) == _norm_speaker(gs)
+        if sp_match:
             sp_correct += 1
         else:
             sp_conf.setdefault((gs, ps), 0)
@@ -69,7 +88,7 @@ def compare_labels(pred: dict, gold: dict) -> dict:
         else:
             emo_conf.setdefault((ge, pe), 0)
             emo_conf[(ge, pe)] += 1
-        if ps != gs or pe != ge:
+        if not sp_match or pe != ge:
             mismatches.append({"line_index": i, "gold_speaker": gs, "pred_speaker": ps,
                                "gold_emotion": ge, "pred_emotion": pe})
     n = len(shared)

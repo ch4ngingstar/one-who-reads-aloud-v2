@@ -41,6 +41,24 @@ def test_compare_labels_accuracy_confusion_and_gaps():
     assert any(m["line_index"] == 1 for m in cmp["mismatches"])
 
 
+def test_compare_labels_normalizes_speaker_aliases():
+    # 'Sky Tide' / 'Saint Tyris' are SPEAKER_ALIASES for 'Tyris' — the diarizer
+    # naming the character by epithet must score as CORRECT, not a confusion.
+    gold = {0: ("Tyris", "neutral"), 1: ("Tyris", "commanding")}
+    pred = {0: ("Sky Tide", "neutral"), 1: ("Saint Tyris", "commanding")}
+    cmp = eval_formatting.compare_labels(pred, gold)
+    assert cmp["speaker_accuracy"] == 1.0, cmp["speaker_confusion"]
+    assert cmp["speaker_confusion"] == {}
+    assert cmp["mismatches"] == []
+
+
+def test_norm_speaker_applies_alias_and_titlecase():
+    assert eval_formatting._norm_speaker("sky tide") == "Tyris"
+    assert eval_formatting._norm_speaker("  Narrator ") == "Narrator"
+    # an unknown name passes through (title-cased), not crashing
+    assert eval_formatting._norm_speaker("zxqwv") == "Zxqwv"
+
+
 def test_resolution_summary_unmapped():
     labels = {0: ("Sunny", "neutral"), 1: ("Zxqwv The Unknown", "neutral")}
     voice_map = {"Sunny": {"path": "x.wav"}}   # no _default → unknown is unmapped
@@ -53,6 +71,8 @@ def test_resolution_summary_unmapped():
 TESTS = [
     test_load_gold_both_shapes,
     test_compare_labels_accuracy_confusion_and_gaps,
+    test_compare_labels_normalizes_speaker_aliases,
+    test_norm_speaker_applies_alias_and_titlecase,
     test_resolution_summary_unmapped,
 ]
 

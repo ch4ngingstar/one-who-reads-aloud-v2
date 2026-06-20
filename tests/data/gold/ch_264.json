@@ -7,7 +7,8 @@
     "source": "Independent reference labels produced by reading the segmenter text BLIND to the live diarizer output (the 'stronger-LLM reference' step of docs/tts-emotion-formatting-test-plan.md Phase 0). Labels follow the same convention the diarizer is given (D/T/P/S kinds; roster-only speakers else Unknown; all Sunny incarnations -> Sunny; unnamed Fire Keepers -> Unknown; emotion from EMOTION_VOCAB).",
     "spot_correct_me": "USER: this is a candidate gold set. Review the flagged ambiguities below and correct any line, then it becomes trusted gold. The diarizer is measured AGAINST this file by scripts/eval_formatting.py.",
     "known_ambiguities": [
-      "L7,9,17,19,22,25,27,31,39,58: Sunny speaks through two incarnations (Lord of Shadows / Saint Shadow vs Master Sunless / Sir Sunless). Roster has only 'Sunny', so both collapse to Sunny here. If you want distinct incarnation voices, re-split these.",
+      "L17 CORRECTED 2026-06-20 (Sunny->Nephis): cross-validated against ch_255 L28-29 where 'Nephis nodded curtly' precedes the identical 'This is Master Sunless...' introduction. The diarizer was right; original gold was wrong.",
+      "L7,9,19,22,25,27,31,39,58: Sunny speaks through two incarnations (Lord of Shadows / Saint Shadow vs Master Sunless / Sir Sunless). Roster has only 'Sunny', so both collapse to Sunny here. If you want distinct incarnation voices, re-split these.",
       "L15,46,63: free-indirect / POV-coloured prose ('were quite cute', 'how could she be so adorably clueless?', 'he really wished'). Labeled Narrator per rule A4 (third-person => Narrator), but each carries Sunny's internal voice and could be argued as Sunny [T].",
       "L35,36,37,43,49,50,52: unnamed Fire Keepers => Unknown per rule A3.",
       "Emotion picks for Sunny dialogue lean on the guide's cold/sarcastic/confused defaults; subjective."
@@ -31,7 +32,7 @@
     {"line_index": 14, "speaker": "Narrator", "emotion": "neutral"},
     {"line_index": 15, "speaker": "Narrator", "emotion": "neutral"},
     {"line_index": 16, "speaker": "Narrator", "emotion": "neutral"},
-    {"line_index": 17, "speaker": "Sunny",    "emotion": "neutral"},
+    {"line_index": 17, "speaker": "Nephis",   "emotion": "neutral"},
     {"line_index": 18, "speaker": "Narrator", "emotion": "neutral"},
     {"line_index": 19, "speaker": "Sunny",    "emotion": "sarcastic"},
     {"line_index": 20, "speaker": "Narrator", "emotion": "neutral"},
