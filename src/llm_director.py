@@ -66,6 +66,9 @@ DEFAULT_SPEAKERS = [
     # Recurring named characters
     "Mordret", "Roan", "Kim", "Asterion", "Julius",
     "Tyris", "Revel",
+    # Post-Vol-9 speakers (added 2026-06-20 from eval_roster.py EPUB audit:
+    # text occurrences Jest 698, Seishan 248, Helie 128, Beastmaster 105).
+    "Jest", "Seishan", "Helie", "Beastmaster",
 ]
 
 EMOTION_VOCAB = [
