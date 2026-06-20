@@ -7,6 +7,11 @@ __pycache__/
 venv/
 env/
 
+# ─── Eval harness generated artifacts (regenerable; report .md is kept) ──
+docs/eval_emotion_clips*/
+docs/eval_*.csv
+docs/eval_*.json
+
 # ─── Node / Next.js ───────────────────────────────────────
 ui/node_modules/
 ui/.next/
