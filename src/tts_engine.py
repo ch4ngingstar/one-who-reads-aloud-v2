@@ -76,18 +76,28 @@ from state_manager import StateManager
 INDEXTTS2_EMOTION_VECTORS: dict[str, "tuple[list[float], float]"] = {
     #            [hap, ang, sad, afr, dis, mel, sur, calm]
     "neutral":   ([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 0.0),
-    "whispers":  ([0.0, 0.0, 0.1, 0.0, 0.0, 0.2, 0.0, 0.6], 0.45),
-    # Retuned 2026-06-20: lowered emo_alpha + added a calm anchor on the 5 "hot"
-    # tags whose objective f0 lift hit +94..+135 Hz (Sunny neutral ~125 Hz → near
-    # falsetto 220-260 Hz). See docs/eval-report-2026-06-20.md / eval_emotion.py.
+    # Weak-4 retune (CANDIDATE — pending ear). eval_emotion flagged whispers/cold/
+    # sad/pleading as "barely distinct" from neutral (f0 lift only +6..+11 Hz), and
+    # whispers read *louder* than neutral (rms_rel +0.09) — wrong for a whisper.
+    # 2026-06-21 GPU re-probe (Sunny ref, vs forced-neutral):
+    #   whispers OK  — now ΔF0 -2 Hz, rms_rel -0.26 (quieter/breathier, the fix).
+    #   cold     OK  — ΔF0 +17 Hz, harder edge, loudness unchanged.
+    #   sad/pleading OVERSHOT on the first weak-4 vectors (sad ΔF0 +40 Hz & LOUDER;
+    #   pleading ΔF0 +88 Hz ≈ 211 Hz, ~2× loud — near-falsetto risk). The `afraid`
+    #   dim drives pitch up hard, so sad/pleading were MODERATED below (lower
+    #   afraid + emo_alpha) toward plaintive-not-shrieky. See eval-report.
+    "whispers":  ([0.0, 0.0, 0.3, 0.15, 0.0, 0.4, 0.0, 0.15], 0.40),
+    # Retuned 2026-06-20 (hot-5 pass): lowered emo_alpha + added a calm anchor on
+    # the 5 "hot" tags whose objective f0 lift hit +94..+135 Hz (Sunny neutral
+    # ~125 Hz → near falsetto 220-260 Hz). Approved by ear. See eval-report.
     "angry":     ([0.0, 0.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2], 0.45),
-    "sad":       ([0.0, 0.0, 0.9, 0.0, 0.0, 0.3, 0.0, 0.0], 0.65),
+    "sad":       ([0.0, 0.0, 0.9, 0.0, 0.0, 0.4, 0.0, 0.0], 0.60),  # moderated from 1.0/0.5@0.75
     "excited":   ([0.6, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3, 0.1], 0.45),
     "commanding":([0.0, 0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.6], 0.60),
     "frightened":([0.0, 0.0, 0.0, 0.7, 0.0, 0.0, 0.15, 0.15], 0.50),
     "confused":  ([0.0, 0.0, 0.0, 0.2, 0.0, 0.2, 0.5, 0.0], 0.55),
-    "pleading":  ([0.0, 0.0, 0.6, 0.3, 0.0, 0.0, 0.0, 0.0], 0.65),
-    "cold":      ([0.0, 0.15, 0.0, 0.0, 0.1, 0.1, 0.0, 0.6], 0.45),
+    "pleading":  ([0.0, 0.0, 0.6, 0.4, 0.0, 0.1, 0.0, 0.0], 0.60),  # afraid 0.4/a0.60: target ~+40Hz (0.3@.55=+3, 0.5@.72=+88)
+    "cold":      ([0.0, 0.25, 0.0, 0.0, 0.2, 0.1, 0.0, 0.55], 0.50),
     "laughing":  ([0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.05], 0.45),
     "sarcastic": ([0.3, 0.2, 0.0, 0.0, 0.3, 0.0, 0.0, 0.3], 0.55),
     "desperate": ([0.0, 0.0, 0.45, 0.45, 0.0, 0.2, 0.0, 0.1], 0.50),
