@@ -704,10 +704,10 @@ class TTSEngine:
             print(
                 f"[tts]   WARN   No voice for '{speaker}' "
                 f"(normalised: '{normalised}', canonical: '{canonical}') "
-                f"— using fallback voice. Add to SPEAKER_ALIASES if recurring."
+                f"-- using fallback voice. Add to SPEAKER_ALIASES if recurring."
             )
         else:
-            print(f"[tts]   ALIAS  '{speaker}' → fallback voice (NPC/Unknown)")
+            print(f"[tts]   ALIAS  '{speaker}' -> fallback voice (NPC/Unknown)")
 
         return TTSEngine._fallback_ref(voice_map)
 

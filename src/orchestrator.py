@@ -284,7 +284,7 @@ class PipelineOrchestrator:
                   f"(id={self._project_id})")
             return
 
-        print(f"[orch] New project — parsing EPUB: {self.cfg.epub_path}")
+        print(f"[orch] New project -- parsing EPUB: {self.cfg.epub_path}")
         parsed = self._parse_epub(
             self.cfg.epub_path,
             output_json=str(Path(self.cfg.db_path).parent / "parsed_book.json"),
@@ -549,7 +549,7 @@ class PipelineOrchestrator:
                       f"{timeout}s wait (baseline {baseline} MB, limit "
                       f"{threshold} MB). TTS loading anyway — may OOM.")
                 return
-            print(f"[orch] VRAM barrier: {used_mb} MB used, want ≤ {threshold} MB, "
+            print(f"[orch] VRAM barrier: {used_mb} MB used, want <= {threshold} MB, "
                   f"waiting ({remaining:.0f}s left)...")
             time.sleep(2)
 
@@ -666,7 +666,7 @@ def _log_event(event: dict) -> None:
         print(f"[orch] Chapter {event.get('chapter_id')} FAILED "
               f"at {event.get('stage')}: {event.get('error')}")
     elif t == "pipeline_done":
-        print(f"[orch] Pipeline done in {event.get('elapsed_s')}s — "
+        print(f"[orch] Pipeline done in {event.get('elapsed_s')}s -- "
               f"success={event.get('success')} "
               f"error={event.get('error')} "
               f"skipped={event.get('skipped')}")
