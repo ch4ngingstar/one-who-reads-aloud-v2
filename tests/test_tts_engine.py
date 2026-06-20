@@ -208,6 +208,23 @@ def test_resolve_ref_audio_dict_entry():
     print("  PASS test_resolve_ref_audio_dict_entry")
 
 
+def test_resolve_ref_audio_never_skips_with_no_default():
+    # "never skip a line": an unmapped speaker with NO _default but other voices
+    # present must still land on a real voice (Narrator preferred), not None.
+    voice_map = {"Narrator": "/voices/narrator.wav", "Sunny": "/voices/sunny.wav"}
+    result = TTSEngine._resolve_ref_audio("SomeNpc", "neutral", voice_map)
+    assert result == "/voices/narrator.wav", f"Got: {result}"
+    print("  PASS test_resolve_ref_audio_never_skips_with_no_default")
+
+
+def test_resolve_ref_audio_fallback_to_any_voice():
+    # No _default, no Narrator — still must not skip: pick any voice deterministically.
+    voice_map = {"Sunny": "/voices/sunny.wav", "Cassie": "/voices/cassie.wav"}
+    result = TTSEngine._resolve_ref_audio("GhostlySailor", "neutral", voice_map)
+    assert result == "/voices/cassie.wav", f"Got: {result}"  # sorted() -> 'Cassie' first
+    print("  PASS test_resolve_ref_audio_fallback_to_any_voice")
+
+
 def test_wav_silence_is_valid_wav():
     wav = _wav_silence(duration_ms=100)
     assert wav[:4] == b"RIFF"
@@ -284,7 +301,9 @@ def test_process_chapter_generates_wav_files():
     print("  PASS test_process_chapter_generates_wav_files")
 
 
-def test_process_chapter_skips_missing_voice():
+def test_process_chapter_never_skips_unmapped_voice():
+    # "never ever skip a line": an unmapped speaker must NOT be dropped — it
+    # falls back to a real voice (Narrator here) and still produces audio.
     sm = _tmp_sm()
     ref_wav = _tmp_wav()
     sm.set_voice("Narrator", str(ref_wav))
@@ -298,14 +317,31 @@ def test_process_chapter_skips_missing_voice():
         engine = _make_engine(sm, out_dir, mock_synth=_mock_synth)
         n = engine.process_chapter(ch_id)
 
-    assert n == 1, f"Only 1 line should succeed, got {n}"
+    assert n == 2, f"Both lines should succeed (no skip), got {n}"
     lines = sm.get_lines_for_chapter(ch_id)
     assert lines[0]["status"] == "tts_done"
-    assert lines[1]["status"] == "failed"
-    assert "No reference audio" in lines[1]["error_message"]
+    assert lines[1]["status"] == "tts_done"  # fell back to Narrator, not skipped
 
     ref_wav.unlink(missing_ok=True)
-    print("  PASS test_process_chapter_skips_missing_voice")
+    print("  PASS test_process_chapter_never_skips_unmapped_voice")
+
+
+def test_process_chapter_fails_only_when_no_voices_at_all():
+    # The ONLY case a line can't be produced: zero voices registered (config error).
+    sm = _tmp_sm()
+    ch_id = _seed_diarized_chapter(sm, [
+        {"line_index": 0, "speaker": "Sunny", "text": "Nothing registered.", "emotion": "neutral"},
+    ])
+
+    with tempfile.TemporaryDirectory() as out_dir:
+        engine = _make_engine(sm, out_dir, mock_synth=_mock_synth)
+        n = engine.process_chapter(ch_id)
+
+    assert n == 0, f"No voices registered -> nothing can synthesise, got {n}"
+    lines = sm.get_lines_for_chapter(ch_id)
+    assert lines[0]["status"] == "failed"
+    assert "No voices registered" in lines[0]["error_message"]
+    print("  PASS test_process_chapter_fails_only_when_no_voices_at_all")
 
 
 def test_process_chapter_retries_on_failure():
@@ -601,12 +637,15 @@ TESTS = [
     test_resolve_ref_audio_missing_returns_none,
     test_resolve_ref_audio_falls_back_to_default,
     test_resolve_ref_audio_dict_entry,
+    test_resolve_ref_audio_never_skips_with_no_default,
+    test_resolve_ref_audio_fallback_to_any_voice,
     test_wav_silence_is_valid_wav,
     test_synthesize_requires_loaded_model,
     test_load_model_requires_model_dir,
     test_back_compat_fish_speech_dir_kwarg,
     test_process_chapter_generates_wav_files,
-    test_process_chapter_skips_missing_voice,
+    test_process_chapter_never_skips_unmapped_voice,
+    test_process_chapter_fails_only_when_no_voices_at_all,
     test_process_chapter_retries_on_failure,
     test_process_chapter_marks_failed_after_all_retries,
     test_process_chapter_empty_no_crash,

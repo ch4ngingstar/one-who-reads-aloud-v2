@@ -465,13 +465,16 @@ class TTSEngine:
                 line["speaker"], line["emotion"], voice_map
             )
             if ref_path is None:
+                # Only reachable when NO voices are registered at all — a hard
+                # config error, not a per-line skip. _resolve_ref_audio always
+                # returns a real voice for any mapped/unmapped speaker otherwise.
                 self.sm.mark_line_failed(
                     line["id"],
-                    f"No reference audio for speaker '{line['speaker']}'. "
-                    "Register via sm.set_voice() or add a '_default' fallback voice."
+                    "No voices registered at all — cannot synthesise. "
+                    "Register at least one voice (e.g. sm.set_voice('_default', path))."
                 )
-                print(f"[tts]   SKIP line {line['line_index']}: no voice for "
-                      f"'{line['speaker']}' (tip: register sm.set_voice('_default', path))")
+                print(f"[tts]   ERR line {line['line_index']}: no voices registered "
+                      "(config error, not a per-line skip)")
                 if progress_callback:
                     progress_callback(processed, total, line)
                 continue
@@ -495,25 +498,41 @@ class TTSEngine:
                 print(f"[tts]   SPLIT line {line['line_index']:>4}: "
                       f"{len(segments)} segments ({len(raw_text)} chars)")
 
+            # Try the resolved voice; if every retry fails, fall back to a
+            # guaranteed voice so a corrupt/odd ref clip can never drop a line.
+            # A line only ends up failed if the engine itself fails on BOTH
+            # voices (e.g. OOM/crash) — never for a content/mapping reason.
+            fallback_path  = self._fallback_ref(voice_map)
+            ref_candidates = [ref_path]
+            if fallback_path and fallback_path != ref_path:
+                ref_candidates.append(fallback_path)
+
             wav_bytes = None
             last_err  = None
-            for attempt in range(self.cfg["max_retries"] + 1):
-                try:
-                    if len(segments) == 1:
-                        wav_bytes = self._synthesize(
-                            segments[0], ref_path, emo_vector, emo_alpha
-                        )
-                    else:
-                        parts = [
-                            self._synthesize(seg, ref_path, emo_vector, emo_alpha)
-                            for seg in segments
-                        ]
-                        wav_bytes = self._concat_wavs(parts)
+            for cand_idx, cand_ref in enumerate(ref_candidates):
+                for attempt in range(self.cfg["max_retries"] + 1):
+                    try:
+                        if len(segments) == 1:
+                            wav_bytes = self._synthesize(
+                                segments[0], cand_ref, emo_vector, emo_alpha
+                            )
+                        else:
+                            parts = [
+                                self._synthesize(seg, cand_ref, emo_vector, emo_alpha)
+                                for seg in segments
+                            ]
+                            wav_bytes = self._concat_wavs(parts)
+                        break
+                    except Exception as e:
+                        last_err = e
+                        print(f"[tts]   Retry {attempt + 1}/{self.cfg['max_retries']} "
+                              f"line {line['line_index']:>4}: {e}")
+                if wav_bytes:
+                    if cand_idx > 0:
+                        print(f"[tts]   FALLBACK line {line['line_index']:>4}: "
+                              "resolved voice failed all retries, "
+                              "synthesised on fallback voice")
                     break
-                except Exception as e:
-                    last_err = e
-                    print(f"[tts]   Retry {attempt + 1}/{self.cfg['max_retries']} "
-                          f"line {line['line_index']:>4}: {e}")
 
             if wav_bytes:
                 audio_path.write_bytes(wav_bytes)
@@ -612,6 +631,27 @@ class TTSEngine:
         return buf.getvalue()
 
     @staticmethod
+    def _extract_path(entry) -> str:
+        """Voice-map entries are {'path':..,'ref_text':..} dicts (or bare path
+        strings in the legacy format). Return the path either way."""
+        if isinstance(entry, dict):
+            return entry["path"]
+        return entry
+
+    @staticmethod
+    def _fallback_ref(voice_map: dict) -> "str | None":
+        """Guaranteed non-skip fallback chain so a line is NEVER dropped for lack
+        of a mapped voice: _default → Narrator → any registered voice (chosen
+        deterministically by sorting). Returns None ONLY when voice_map is empty —
+        a true config error (no voices registered at all)."""
+        for key in ("_default", "Narrator"):
+            if key in voice_map:
+                return TTSEngine._extract_path(voice_map[key])
+        for key in sorted(voice_map):
+            return TTSEngine._extract_path(voice_map[key])
+        return None
+
+    @staticmethod
     def _resolve_ref_audio(
         speaker: str,
         emotion: str,
@@ -625,39 +665,30 @@ class TTSEngine:
           2. Check SPEAKER_ALIASES → remap to canonical voice key.
           3. Try "{canonical}_{emotion}" in voice_map (legacy emotion clips).
           4. Try "{canonical}" in voice_map.
-          5. Try "_default" in voice_map (prints a warning for tracking).
-          6. Return None only if _default is also absent.
-        """
-        def _extract(entry) -> str:
-            if isinstance(entry, dict):
-                return entry["path"]
-            return entry  # backward compat if old string format
+          5. Fall back via _fallback_ref (_default → Narrator → any voice).
 
+        A line is NEVER skipped for a missing mapping — unmapped speakers always
+        land on a real voice. None is returned ONLY when no voices are registered
+        at all (voice_map empty), which the caller treats as a hard config error.
+        """
         normalised = speaker.strip().title()
         canonical = SPEAKER_ALIASES.get(normalised, normalised)
 
-        if canonical == "_default":
-            if "_default" in voice_map:
-                print(f"[tts]   ALIAS  '{speaker}' -> _default (NPC/Unknown fallback)")
-                return _extract(voice_map["_default"])
-            return None
-
-        emotion_key = f"{canonical}_{emotion}"
-        if emotion_key in voice_map:
-            return _extract(voice_map[emotion_key])
-
-        if canonical in voice_map:
-            return _extract(voice_map[canonical])
-
-        if "_default" in voice_map:
+        if canonical != "_default":
+            emotion_key = f"{canonical}_{emotion}"
+            if emotion_key in voice_map:
+                return TTSEngine._extract_path(voice_map[emotion_key])
+            if canonical in voice_map:
+                return TTSEngine._extract_path(voice_map[canonical])
             print(
                 f"[tts]   WARN   No voice for '{speaker}' "
                 f"(normalised: '{normalised}', canonical: '{canonical}') "
-                f"— using _default. Add to SPEAKER_ALIASES if recurring."
+                f"— using fallback voice. Add to SPEAKER_ALIASES if recurring."
             )
-            return _extract(voice_map["_default"])
+        else:
+            print(f"[tts]   ALIAS  '{speaker}' → fallback voice (NPC/Unknown)")
 
-        return None
+        return TTSEngine._fallback_ref(voice_map)
 
     # ── Raw synthesis call (injectable for testing) ───────────────────────────
 
