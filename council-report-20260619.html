@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Council — Performance · June 19, 2026</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212b; --border:#2a2f3a;
+    --ink:#e7e9ee; --muted:#9aa3b2; --accent:#7c9cff; --good:#5ad19a;
+    --warn:#f0b65b; --bad:#f07a7a; --line:#363c4a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.6;font-size:16px}
+  .wrap{max-width:860px;margin:0 auto;padding:40px 24px 80px}
+  header.top{border-bottom:1px solid var(--border);padding-bottom:22px;margin-bottom:30px}
+  .kicker{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:700}
+  h1{font-size:26px;margin:8px 0 6px;font-weight:700}
+  .sub{color:var(--muted);font-size:14px}
+  .q{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--accent);
+    border-radius:10px;padding:16px 18px;margin:22px 0;color:#dfe3ec;font-size:15px}
+  .q b{color:var(--accent)}
+  h2{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);
+    margin:38px 0 14px;border-bottom:1px solid var(--line);padding-bottom:8px}
+  .verdict{background:linear-gradient(180deg,#1b1f29,#14171e);border:1px solid var(--border);
+    border-radius:14px;padding:6px 22px 18px}
+  .vblock{padding:16px 0;border-bottom:1px solid var(--line)}
+  .vblock:last-child{border-bottom:none}
+  .vblock h3{margin:0 0 6px;font-size:16px}
+  .vblock.rec h3{color:var(--good)}
+  .vblock.first h3{color:var(--accent)}
+  .vblock.clash h3{color:var(--warn)}
+  .vblock p{margin:6px 0;color:#d3d8e2;font-size:15px}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;
+    margin-left:8px;vertical-align:middle}
+  .pill.do{background:rgba(90,209,154,.15);color:var(--good);border:1px solid rgba(90,209,154,.4)}
+
+  /* spectrum */
+  .spectrum{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px}
+  .axis{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:600}
+  .bar{height:6px;border-radius:6px;background:linear-gradient(90deg,var(--good),#3a4150 50%,var(--warn));margin-bottom:18px}
+  .adv{display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
+  .adv:first-of-type{border-top:none}
+  .dot{flex:none;width:10px;height:10px;border-radius:50%;margin-top:7px}
+  .adv .name{font-weight:700;font-size:14px}
+  .adv .name small{font-weight:500;color:var(--muted);margin-left:6px}
+  .adv .take{color:#c7cdd9;font-size:13.5px;margin-top:1px}
+  .tag{font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:5px;margin-left:6px;vertical-align:middle}
+  .tag.win{background:rgba(124,156,255,.16);color:var(--accent)}
+  .tag.flag{background:rgba(240,122,122,.16);color:var(--bad)}
+
+  details{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    margin:10px 0;padding:0 16px}
+  details[open]{background:var(--panel2)}
+  summary{cursor:pointer;padding:14px 0;font-weight:600;font-size:15px;list-style:none;
+    display:flex;align-items:center;justify-content:space-between}
+  summary::-webkit-details-marker{display:none}
+  summary .chev{color:var(--muted);font-size:13px;transition:transform .2s}
+  details[open] summary .chev{transform:rotate(90deg)}
+  details .body{padding:2px 0 16px;color:#cdd3df;font-size:14.5px;border-top:1px solid var(--line)}
+  .agreebox{background:rgba(90,209,154,.07);border:1px solid rgba(90,209,154,.25);border-radius:10px;
+    padding:14px 18px;margin:14px 0;font-size:14.5px}
+  .agreebox b{color:var(--good)}
+  footer{margin-top:48px;color:var(--muted);font-size:12.5px;text-align:center;
+    border-top:1px solid var(--border);padding-top:20px}
+  code{background:#0b0d12;border:1px solid var(--border);border-radius:5px;padding:1px 6px;font-size:13px;color:#cfe0ff}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="kicker">LLM Council · Verdict</div>
+    <h1>How to improve the pipeline's performance</h1>
+    <div class="sub">One Who Reads Aloud — Shadow Slave audiobook pipeline · June 19, 2026</div>
+  </header>
+
+  <div class="q">
+    <b>The question:</b> The June 15 council's feedback (reliability + audio demo) is done.
+    Now — what's the highest-leverage way to make the pipeline faster, given a ~12&nbsp;GB VRAM
+    machine that load/unloads the LLM and IndexTTS2 <b>per chapter</b>, ~11–17&nbsp;s/line TTS,
+    ~655 chapters pending, and frequent power cuts in Iraq?
+  </div>
+
+  <div class="agreebox">
+    <b>Unanimous diagnosis →</b> The real waste isn't the 17&nbsp;s/line. It's the
+    <b>per-chapter model load / unload / VRAM-barrier cycle paid 655 times</b> — an estimated
+    11–16+ hours of pure swapping. All five advisors independently prescribed the same cure:
+    <b>batch by stage, not by chapter.</b>
+  </div>
+
+  <h2>The Verdict</h2>
+  <div class="verdict">
+    <div class="vblock first">
+      <h3>Where the council agrees</h3>
+      <p>Keep the LLM hot, diarize a <em>range</em> of chapters, unload once, cross the VRAM barrier
+      once, then keep IndexTTS2 hot and synthesize that whole range. The orchestrator already tracks
+      per-chapter <code>diarized</code> status in SQLite, so this is an outer-loop control-flow change
+      — not a model change — and stays power-cut safe. Two riders: <b>A/B test fp16</b> (prove it by ear),
+      and <b>measure the real swap cost from <code>pipeline.log</code></b> before building anything.</p>
+    </div>
+    <div class="vblock clash">
+      <h3>Where the council clashes</h3>
+      <p><b>How big a batch.</b> The Expansionist pushed "diarize ALL 655 in one continuous session."
+      Four of five reviewers flagged this as the council's biggest blind spot — in power-cut Iraq, a
+      monolithic multi-hundred-hour run maximizes the work lost when the lights go out. The resolution:
+      <b>moderate batches (~20–50 chapters)</b> capture nearly all the savings while surviving a blackout.</p>
+    </div>
+    <div class="vblock">
+      <h3>Blind spots peer review caught</h3>
+      <p>• Batch the <em>scheduling</em>, not the <em>context</em> — merging chapter contexts risks
+      breaking the diarizer's anchoring and growing KV-cache VRAM.<br>
+      • fp16 may underdeliver — IndexTTS2's autoregressive stage is likely latency-bound, not matmul-bound.<br>
+      • A <b>smaller diarization model (7B/4B)</b> could halve the LLM's swap tax — maybe even let both
+      models coexist and kill the barrier entirely.<br>
+      • <b>Trust is the real scale bottleneck</b> — an automated correctness gate (unmapped speakers,
+      silent lines, duration outliers) beats raw speed given prior misattribution bugs.</p>
+    </div>
+    <div class="vblock rec">
+      <h3>The recommendation <span class="pill do">BATCH BY STAGE</span></h3>
+      <p><b>1.</b> Read <code>pipeline.log</code> — sum load/barrier/diarize/synthesize for ~5 recent
+      chapters to get your real per-chapter swap cost.<br>
+      <b>2.</b> Add an outer loop to <code>PipelineOrchestrator</code>: diarize the whole range with the
+      LLM loaded once (fresh context per chapter), unload, barrier once, then synthesize the range with
+      IndexTTS2 loaded once. <em>This is the 80% win.</em><br>
+      <b>3.</b> Cheap follow-ons: A/B fp16 on 3 lines; pipeline FFmpeg(N-1) against TTS(N); consider
+      in-TTS line batching last. <b>Don't</b> re-touch num_beams, chase deepspeed, or run all 655 at once.</p>
+    </div>
+    <div class="vblock first">
+      <h3>⟶ The one thing to do first</h3>
+      <p>Open <code>pipeline.log</code> and <b>sum the per-stage timings for the last ~5 chapters</b>
+      to get your real cold-load + barrier cost. That single number confirms the council's premise and
+      tells you exactly how many hours stage-batching will save — before you write a line of code.</p>
+    </div>
+  </div>
+
+  <h2>Where each advisor landed</h2>
+  <div class="spectrum">
+    <div class="axis"><span>Just ship the fix ▸ pragmatic</span><span>◂ rethink the frame</span></div>
+    <div class="bar"></div>
+
+    <div class="adv">
+      <span class="dot" style="background:var(--good)"></span>
+      <div>
+        <div class="name">The Executor <small>strongest — all 5 reviewers</small><span class="tag win">PICK</span></div>
+        <div class="take">Batch the stages (outer loop, SQLite-safe), A/B fp16, and pipeline idle CPU/GPU
+        (FFmpeg N-1 vs TTS N). Don't touch num_beams or deepspeed.</div>
+      </div>
+    </div>
+    <div class="adv">
+      <span class="dot" style="background:#7fe0b8"></span>
+      <div>
+        <div class="name">The Contrarian</div>
+        <div class="take">The swap tax is unmeasured; fp32 is kept "out of fear." But throughput is moot
+        if a long run dies at hour 14 — resumability first.</div>
+      </div>
+    </div>
+    <div class="adv">
+      <span class="dot" style="background:var(--accent)"></span>
+      <div>
+        <div class="name">The First Principles Thinker</div>
+        <div class="take">Goal is "655 listenable chapters on a blackout-prone box," not "faster TTS."
+        Batch + amortize; maybe generate N-ahead of the listener, not all 655.</div>
+      </div>
+    </div>
+    <div class="adv">
+      <span class="dot" style="background:var(--warn)"></span>
+      <div>
+        <div class="name">The Outsider</div>
+        <div class="take">Why interleave per chapter at all? What does one cold load actually cost?
+        Profile <code>pipeline.log</code> — you're optimizing by anecdote.</div>
+      </div>
+    </div>
+    <div class="adv">
+      <span class="dot" style="background:var(--bad)"></span>
+      <div>
+        <div class="name">The Expansionist <span class="tag flag">BLIND SPOT</span></div>
+        <div class="take">Best unique idea — diarized JSON is a re-renderable asset. But "run all 655 in
+        one session" ignores power cuts; 4/5 reviewers flagged it.</div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Full advisor responses</h2>
+
+  <details>
+    <summary><span>🧨 The Contrarian</span><span class="chev">▸</span></summary>
+    <div class="body"><p>The num_beams 5→3 fix already happened, so the obvious lever is gone. The fatal
+    assumption: that per-chapter load/unload is "free" relative to TTS. It isn't — loading a 14B GGUF AND
+    IndexTTS2 AND polling nvidia-smi to &lt;1GB happens 655 times. If load+barrier is 60–90s/chapter,
+    that's 16+ hours of swap overhead — unmeasured. Measure it first. Second, fp32: you "kept" it, which
+    reads like fear. fp16 is the single biggest available speedup and you're refusing it without stating
+    an observed regression. Prove the degradation is audible — if it isn't, you're leaving ~2x on the
+    table out of superstition. Third, the one nobody's saying: stop swapping entirely. Diarize 20 chapters
+    in ONE LLM session, unload once, synthesize 20 in ONE TTS session — same VRAM ceiling, 1/20th the swap
+    tax. The thing being avoided: with frequent power cuts, none of this matters if a 16-hour run dies at
+    hour 14. Throughput isn't the real bottleneck — resumability is.</p></div>
+  </details>
+
+  <details>
+    <summary><span>🔬 The First Principles Thinker</span><span class="chev">▸</span></summary>
+    <div class="body"><p>Strip the question down: the goal isn't "make TTS faster," it's "produce 655
+    listenable chapters on a power-cut-prone 12GB machine in Iraq." Seconds-per-line is the wrong frame.
+    Math: ~17s/line × ~100 lines = ~28min TTS/chapter, ~300+ hours total. The real enemy is the per-chapter
+    load/unload/VRAM-barrier dance paid 655 times, plus power cuts meaning you never get a long clean run.
+    The actual problem is batching and amortization. Flip the orchestrator: diarize 20–50 chapters in ONE
+    LLM session (model stays hot, no reload, no barrier), unload once, then synthesize all of them in ONE
+    TTS session — eliminating ~650 loads and ~650 barriers, zero quality risk, directly serving the "short
+    runs between blackouts" reality. What's overlooked: you don't need the whole novel generated — who
+    listens to 655 chapters back-to-back? Generate on-demand or N-chapters-ahead of where the listener
+    actually is. The cheapest computation is the one you never run. And question fp32 — A/B three lines.</p></div>
+  </details>
+
+  <details>
+    <summary><span>🚀 The Expansionist</span><span class="chev">▸</span></summary>
+    <div class="body"><p>IndexTTS2 synthesizing one line at a time is the single most undervalued
+    opportunity. The model processes 30–200 lines serially at ~15s each, but TTS inference is dominated by
+    fixed per-call overhead and underutilized GPU. Batch the lines — even batch-of-4 on the GPT/semantic
+    stage could 2–3x throughput on the same hardware, for free. Bigger: you load/unload two ~9GB models 655
+    times — pure thrash. Decouple the stages: diarize ALL 655 chapters in one continuous LLM session, then
+    run TTS for everything in one continuous session, eliminating ~1300 load/unload cycles and the barrier
+    between every chapter. The overlooked upside nobody's pricing in: once diarization is cached as
+    structured data, it's a reusable asset — re-render the entire audiobook with a better TTS model,
+    different voices, or fixed pronunciations WITHOUT re-running the 14B LLM. The diarized JSON is the real
+    product. Build the pipeline around that re-renderable asset and you've turned a one-shot render into a
+    re-renderable library.</p></div>
+  </details>
+
+  <details>
+    <summary><span>👁 The Outsider</span><span class="chev">▸</span></summary>
+    <div class="body"><p>The TTS load/unload cycle is the elephant nobody is naming — you wrote it as a
+    HARD CONSTRAINT and then everyone, including you, stopped questioning it. What does one cold load of
+    IndexTTS2 actually cost in wall-clock seconds? That number is suspiciously absent. If it's 30–60s,
+    you're throwing away 5–10 hours of loading across the backlog — invisible, untimed, unfixed while
+    everyone obsesses over 17s/line. The thing experts take for granted: that the work must be interleaved
+    per chapter. Why? Diarize a BATCH with the LLM loaded once, persist to SQLite (you already have it),
+    unload once, load TTS once, synthesize the whole batch — one load/unload pair per 20 chapters. The 12GB
+    constraint is fully respected. The objection will be "power cuts," but diarization batches are short and
+    resumable, and TTS already resumes per-line. Before any of this: have you actually profiled where a
+    chapter's wall-clock goes with real timestamps? You have pipeline.log. If you haven't summed those
+    columns, you're optimizing by anecdote.</p></div>
+  </details>
+
+  <details>
+    <summary><span>⚙️ The Executor</span><span class="chev">▸</span></summary>
+    <div class="body"><p>The numbers make it obvious: loading/unloading two models per chapter across 655
+    chapters = ~655 LLM loads + ~655 TTS loads + ~655 VRAM barrier polls (up to 180s each). At even 60–90s
+    overhead per chapter, that's 11–16 HOURS of VRAM spent doing nothing but swapping weights. Monday fix:
+    <b>batch the stages.</b> Diarize a RANGE with the LLM loaded once, unload, barrier ONCE, then TTS the
+    whole range with IndexTTS2 loaded once. The orchestrator already has per-chapter status
+    (<code>diarized</code>) — just add an outer loop. Power-cut safe because each chapter commits status to
+    SQLite as it finishes. Second: fp32 → fp16, free 1.5–2x with no audible loss in an audiobook, one flag,
+    A/B it. Third, overlooked: your CPU sits idle during TTS and your GPU sits idle during FFmpeg assembly —
+    pipeline them (synthesize chapter N while FFmpeg assembles N-1). Don't touch num_beams again, don't
+    chase deepspeed on Windows. Batch first.</p></div>
+  </details>
+
+  <details>
+    <summary><span>🔍 Peer review highlights</span><span class="chev">▸</span></summary>
+    <div class="body">
+      <p><b>Strongest (5/5): The Executor</b> — the only response that names every lever, ranks them,
+      ties batching to per-chapter SQLite safety, and catches the idle CPU/GPU pipelining win.</p>
+      <p><b>Biggest blind spot (4/5): The Expansionist</b> — "run all 655 in one continuous session"
+      is hostile to power cuts; a monolithic run guarantees no clean completion. (Reviewer 4 instead
+      flagged First Principles' "generate on-demand" as optimizing away the deliverable.)</p>
+      <p><b>What all five missed:</b> (1) Batch scheduling vs. context — merging contexts risks the
+      diarizer's anchoring and KV-cache VRAM. (2) fp16 may underdeliver on a latency-bound autoregressive
+      model. (3) A smaller diarization model could halve the swap tax or kill the barrier. (4) Trust/QA at
+      655-chapter scale — an automated correctness gate beats raw s/line. (5) Nobody actually measured
+      cold-load cost from pipeline.log before prescribing.</p>
+    </div>
+  </details>
+
+  <footer>
+    LLM Council · 5 advisors, anonymized peer review, chairman synthesis<br>
+    Counciled: performance-improvement strategy for the Shadow Slave audiobook pipeline ·
+    June 19, 2026 · <code>council-report-20260619.html</code>
+  </footer>
+
+</div>
+</body>
+</html>

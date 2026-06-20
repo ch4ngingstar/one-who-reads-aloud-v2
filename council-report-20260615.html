@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Council Report — One Who Reads Aloud</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f8f9fa;
+    color: #1a1a2e;
+    line-height: 1.65;
+  }
+  .header {
+    background: #1a1a2e;
+    color: #e8e8f0;
+    padding: 2.5rem 2rem 2rem;
+    border-bottom: 3px solid #4a4a8a;
+  }
+  .header .label {
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #8888aa;
+    margin-bottom: 0.5rem;
+  }
+  .header h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+    color: #fff;
+  }
+  .header .question {
+    font-size: 0.95rem;
+    color: #b0b0cc;
+    max-width: 820px;
+    border-left: 3px solid #4a4a8a;
+    padding-left: 1rem;
+  }
+  .header .meta {
+    margin-top: 1rem;
+    font-size: 0.78rem;
+    color: #6666aa;
+  }
+
+  .container { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
+
+  /* Verdict section */
+  .verdict {
+    background: #fff;
+    border: 1.5px solid #e0e0ee;
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 2rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  }
+  .verdict-header {
+    background: #1a1a2e;
+    color: #fff;
+    padding: 1rem 1.5rem;
+    font-size: 0.8rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .verdict-header .badge {
+    background: #4a4a8a;
+    color: #e0e0ff;
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+  }
+  .verdict-body { padding: 1.75rem; }
+
+  .verdict-section { margin-bottom: 1.75rem; }
+  .verdict-section:last-child { margin-bottom: 0; }
+  .verdict-section h2 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #6666aa;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid #eeeef8;
+  }
+  .verdict-section p { font-size: 0.95rem; color: #2a2a3e; margin-bottom: 0.75rem; }
+  .verdict-section p:last-child { margin-bottom: 0; }
+  .verdict-section strong { color: #1a1a2e; }
+
+  .one-thing {
+    background: linear-gradient(135deg, #1a1a2e 0%, #2a2a5e 100%);
+    border-radius: 8px;
+    padding: 1.5rem;
+    color: #fff;
+    margin-top: 0;
+  }
+  .one-thing h2 {
+    color: #9090dd !important;
+    border-bottom-color: #3a3a6e !important;
+  }
+  .one-thing p { color: #d0d0ee !important; font-size: 1rem !important; }
+
+  /* Agreement grid */
+  .grid-section {
+    background: #fff;
+    border: 1.5px solid #e0e0ee;
+    border-radius: 10px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  }
+  .grid-section h2 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #6666aa;
+    margin-bottom: 1.25rem;
+  }
+  .advisor-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+  }
+  .advisor-card {
+    border-radius: 7px;
+    padding: 0.85rem 0.6rem;
+    text-align: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border: 1.5px solid;
+  }
+  .advisor-card .name { display: block; margin-bottom: 0.3rem; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .advisor-card .stance { display: block; font-size: 0.7rem; font-weight: 400; margin-top: 0.3rem; }
+  .card-reliability { background: #f0f0ff; border-color: #8080cc; color: #3030aa; }
+  .card-demo { background: #fff0f8; border-color: #cc80a0; color: #aa3060; }
+  .card-math { background: #f0fff4; border-color: #80cc99; color: #307a50; }
+
+  .signal-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.6rem; }
+  .signal-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .dot-strong { background: #5050cc; }
+  .dot-medium { background: #cc8844; }
+  .dot-weak { background: #aaaaaa; }
+  .signal-label { font-size: 0.85rem; }
+
+  .clash-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-top: 0.75rem;
+  }
+  .clash-side {
+    border-radius: 7px;
+    padding: 0.85rem 1rem;
+    font-size: 0.84rem;
+  }
+  .clash-side h4 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.5rem; }
+  .clash-left { background: #f0f0ff; border: 1px solid #c0c0ee; }
+  .clash-left h4 { color: #5050aa; }
+  .clash-right { background: #fff0f0; border: 1px solid #eec0c0; }
+  .clash-right h4 { color: #aa3030; }
+
+  /* Blind spots */
+  .blindspot {
+    border-left: 4px solid;
+    padding: 0.85rem 1rem;
+    margin-bottom: 0.85rem;
+    border-radius: 0 6px 6px 0;
+    font-size: 0.87rem;
+  }
+  .blindspot h4 { font-size: 0.73rem; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.4rem; }
+  .blindspot-copy { border-color: #e06060; background: #fff4f4; }
+  .blindspot-copy h4 { color: #cc2222; }
+  .blindspot-storage { border-color: #e09040; background: #fffaf0; }
+  .blindspot-storage h4 { color: #cc6000; }
+  .blindspot-order { border-color: #40a060; background: #f0fff4; }
+  .blindspot-order h4 { color: #207040; }
+
+  /* Collapsible advisors */
+  .advisors-section {
+    margin-bottom: 2rem;
+  }
+  .advisors-section h2 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #6666aa;
+    margin-bottom: 1rem;
+  }
+  details {
+    background: #fff;
+    border: 1.5px solid #e0e0ee;
+    border-radius: 8px;
+    margin-bottom: 0.6rem;
+    overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  }
+  summary {
+    padding: 0.9rem 1.25rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.88rem;
+    font-weight: 600;
+    list-style: none;
+    user-select: none;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::after {
+    content: '▸';
+    margin-left: auto;
+    font-size: 0.75rem;
+    color: #aaaacc;
+    transition: transform 0.2s;
+  }
+  details[open] summary::after { transform: rotate(90deg); }
+  .advisor-tag {
+    font-size: 0.68rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+  }
+  .tag-contrarian { background: #ffe0e0; color: #aa2222; }
+  .tag-firstprinciples { background: #e0e8ff; color: #2244aa; }
+  .tag-expansionist { background: #e0fff0; color: #227744; }
+  .tag-outsider { background: #fff4e0; color: #aa6600; }
+  .tag-executor { background: #f0e0ff; color: #6622aa; }
+  .advisor-body {
+    padding: 1.25rem 1.5rem;
+    font-size: 0.88rem;
+    border-top: 1px solid #eeeef8;
+    color: #2a2a3e;
+    line-height: 1.7;
+  }
+  .advisor-body p { margin-bottom: 0.7rem; }
+  .advisor-body ol { padding-left: 1.5rem; }
+  .advisor-body li { margin-bottom: 0.5rem; }
+
+  /* Peer reviews */
+  .reviews-section {
+    margin-bottom: 2rem;
+  }
+  details.review {
+    border-color: #e8e8ee;
+  }
+  .review-body {
+    padding: 1rem 1.5rem;
+    font-size: 0.86rem;
+    border-top: 1px solid #eeeef8;
+    color: #3a3a4e;
+    line-height: 1.65;
+  }
+  .review-body ol { padding-left: 1.5rem; }
+  .review-body li { margin-bottom: 0.5rem; }
+  .review-body strong { color: #1a1a2e; }
+
+  .footer {
+    text-align: center;
+    font-size: 0.75rem;
+    color: #9999bb;
+    padding: 2rem 0 3rem;
+    border-top: 1px solid #e0e0ee;
+    margin-top: 1rem;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="label">LLM Council Report</div>
+  <h1>One Who Reads Aloud — What to Do Next</h1>
+  <div class="question">
+    Should the next investment go into (a) performance optimization of the pipeline, (b) further UI improvements, (c) something else entirely? What's the highest-leverage next move, and is there a hidden priority the user might be missing?
+  </div>
+  <div class="meta">June 15, 2026 &nbsp;·&nbsp; 5 advisors &nbsp;·&nbsp; 5 peer reviews &nbsp;·&nbsp; 1 chairman synthesis</div>
+</div>
+
+<div class="container">
+
+  <!-- CHAIRMAN VERDICT -->
+  <div class="verdict">
+    <div class="verdict-header">
+      <span>Chairman's Verdict</span>
+      <span class="badge">Final Answer</span>
+    </div>
+    <div class="verdict-body">
+
+      <div class="verdict-section">
+        <h2>Where the Council Agrees</h2>
+        <p>Every advisor independently reached the same conclusion: the audio demo should exist and currently does not. This is a high-confidence signal — the absence is real and the fix is cheap.</p>
+        <p>More importantly, four of five advisors converged on a second point: the pipeline's ability to run <strong>unattended at scale</strong> is the actual constraint, and nobody has measured it directly. The Executor put numbers on it (65–110 hours of compute remaining). The Contrarian named the failure modes (VRAM barrier hangs, context overflows on long chapters, FFmpeg silent corruption). The First Principles Thinker framed the stakes: at 300+ hours of sequential GPU time, a pipeline that dies at hour 6 and loses its state is not a slow pipeline — it is a broken one.</p>
+        <p><strong>The council agrees: UI is done. "Make TTS faster" is not the priority. Batch throughput and survivability are.</strong></p>
+      </div>
+
+      <div class="verdict-section">
+        <h2>Where the Council Clashes</h2>
+        <p>The genuine disagreement is between the <strong>Expansionist/Outsider camp</strong> (audio demo is the unlock for everything — contributors, community, motivation) and the <strong>Contrarian/Reviewer camp</strong> (audio demo is secondary, and publishing synthesized audio of Shadow Slave may raise copyright issues).</p>
+        <p>The Outsider calls the two-week delay on the demo a psychological tell — the user is treating a 30-minute task as a project. Three of five peer reviewers pushed back hard: "Shadow Slave" is a licensed work under Kharn Ding (Xiaoman). MIT covers the code. It does not cover derivative audio works from the author's text. The user's own memory file records the demo as "blocked on user's voice choice + free GPU" — the Outsider's "30-minute task" framing is factually wrong.</p>
+        <p>The disagreement resolves this way: the demo matters, but it cannot be treated as a free, zero-risk action. <strong>The copyright question must be answered before anything is published publicly.</strong></p>
+      </div>
+
+      <div class="verdict-section">
+        <h2>Blind Spots the Council Caught</h2>
+        <div class="blindspot blindspot-copy">
+          <h4>Copyright (3/5 reviewers flagged independently)</h4>
+          Publishing synthesized audio derived from a copyrighted web novel is not covered by MIT. Before any public audio demo, the options are: get explicit permission from the author, use a public-domain text for the demo clip, or keep the demo private/unlisted. This is the most important blind spot the council surfaced.
+        </div>
+        <div class="blindspot blindspot-storage">
+          <h4>Storage at scale</h4>
+          410+ chapters × ~200 lines each × 1 WAV per line = 80,000+ intermediate files and potentially 30–60 GB of disk before WAVs are cleaned up after assembly. If WAVs are not deleted on chapter completion, disk space becomes the binding constraint before GPU time does.
+        </div>
+        <div class="blindspot blindspot-order">
+          <h4>Chapter ordering strategy</h4>
+          With 410+ chapters unprocessed, there is no guarantee the pipeline is running them in reading order. Processing sequentially from where the user is in the novel means every completed chapter is immediately listenable. Zero-code, zero-cost, directly serves the goal.
+        </div>
+      </div>
+
+      <div class="verdict-section">
+        <h2>The Recommendation</h2>
+        <p>Fix unattended batch reliability first. Everything else — the audio demo, any performance work, UI polish — is irrelevant if the pipeline dies at 2 AM and resumes from the wrong state.</p>
+        <p>The orchestrator needs verified chapter-level error isolation: a single chapter failure (VRAM barrier hang, context overflow on a 3,000-word chapter, FFmpeg producing a 0-byte MP3) must log the error, mark that chapter <code>error</code>, and advance to the next chapter automatically without stopping the batch.</p>
+        <p>A 20% TTS speedup saves 13–22 hours. Fixing a bug that causes the pipeline to die and restart from scratch saves all of it.</p>
+        <p>On the audio demo: the right move is a private or unlisted clip first. Do not post public synthesized Shadow Slave audio before resolving the copyright question with the author.</p>
+      </div>
+
+      <div class="verdict-section one-thing">
+        <h2>The One Thing to Do First</h2>
+        <p>Run the pipeline unattended overnight on 10 consecutive chapters and read the log in the morning. Do not fix anything yet — just observe. If it completes all 10, your batch infrastructure is sound and you move to the demo and storage hygiene. If it stops before 10, the failure mode it exposes is the only problem worth solving right now.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- AGREEMENT VISUAL -->
+  <div class="grid-section">
+    <h2>Advisor Positions at a Glance</h2>
+    <div class="advisor-grid">
+      <div class="advisor-card card-reliability">
+        <span class="name">Contrarian</span>
+        Reliability first
+        <span class="stance">Batch must survive weeks unattended before anything else</span>
+      </div>
+      <div class="advisor-card card-math">
+        <span class="name">First Principles</span>
+        Do the math
+        <span class="stance">Feasibility unknown — run the numbers, then decide</span>
+      </div>
+      <div class="advisor-card card-demo">
+        <span class="name">Expansionist</span>
+        Demo first
+        <span class="stance">Audio clip unlocks community + reference impl potential</span>
+      </div>
+      <div class="advisor-card card-demo">
+        <span class="name">Outsider</span>
+        Demo only
+        <span class="stance">Repo has zero proof of quality — nothing else matters</span>
+      </div>
+      <div class="advisor-card card-reliability">
+        <span class="name">Executor</span>
+        Batch throughput
+        <span class="stance">65–110 hrs compute left; fix overnight running first</span>
+      </div>
+    </div>
+
+    <div style="margin-top:1rem">
+      <div class="signal-row"><div class="signal-dot dot-strong"></div><div class="signal-label"><strong>High confidence:</strong> UI is done — no more UI work needed</div></div>
+      <div class="signal-row"><div class="signal-dot dot-strong"></div><div class="signal-label"><strong>High confidence:</strong> Audio demo is needed — delay is a real problem</div></div>
+      <div class="signal-row"><div class="signal-dot dot-strong"></div><div class="signal-label"><strong>High confidence:</strong> Batch reliability is the blocking constraint, not per-line speed</div></div>
+      <div class="signal-row"><div class="signal-dot dot-medium"></div><div class="signal-label"><strong>Contested:</strong> Whether to publish demo publicly (copyright unresolved)</div></div>
+      <div class="signal-row"><div class="signal-dot dot-weak"></div><div class="signal-label"><strong>Low signal:</strong> Performance optimization (wrong frame — survivability matters more)</div></div>
+    </div>
+
+    <div style="margin-top:1.25rem">
+      <h2 style="margin-bottom:0.75rem">The Core Clash</h2>
+      <div class="clash-row">
+        <div class="clash-side clash-left">
+          <h4>Expansionist + Outsider</h4>
+          Audio demo is the unlock for community, contributors, and motivation. A 60-second clip on the README changes everything. The two-week delay is a psychological blocker, not a real one.
+        </div>
+        <div class="clash-side clash-right">
+          <h4>Contrarian + 3 Reviewers</h4>
+          Copyright is unresolved. Shadow Slave is licensed. MIT covers the code, not the audio. The demo must be private/unlisted until the author question is answered. Batch reliability comes first anyway.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADVISOR RESPONSES (collapsible) -->
+  <div class="advisors-section">
+    <h2>Advisor Responses (Full)</h2>
+
+    <details>
+      <summary>
+        <span class="advisor-tag tag-contrarian">Contrarian</span>
+        Reliability is the question you're not asking
+      </summary>
+      <div class="advisor-body">
+        <p>The question is framed wrong, and that's the first flaw to fix.</p>
+        <p>You're debating UI polish versus performance when neither addresses the actual bottleneck: you have 410+ chapters to process and a sequential pipeline that cannot run unattended overnight without human babysitting.</p>
+        <p>What fails at scale that nobody is asking about? Failure recovery at chapter-volume scale. The resume logic handles <code>diarized</code> and <code>error</code> states, but what happens at hour 6 of a batch run when the VRAM barrier poll hangs, a GGUF context overflows on an unusually long chapter, or FFmpeg silently produces a corrupt MP3? Does the orchestrator catch that, log it clearly, and continue to the next chapter — or does the whole batch die and you wake up to nothing?</p>
+        <p>The 410-chapter math is brutal. At 45 seconds to diarize plus ~200 lines × 14 seconds = ~47 minutes TTS per chapter, that's roughly 350+ hours of wall-clock time. Sequential. Single machine. 12 GB VRAM constraint means no parallelism. You need that pipeline to run for weeks without intervention.</p>
+        <p>Before performance optimization or UI improvements, the hidden priority is <strong>unattended reliability</strong>: robust chapter-level error isolation, a dead-man's-switch that resumes from exactly the right state after a crash or reboot, and a health-check log you can glance at in the morning.</p>
+        <p>The audio demo is also genuinely blocked and matters more than either option listed — a public repo with no audio sample gets zero traction. Fix that first, it takes one hour.</p>
+      </div>
+    </details>
+
+    <details>
+      <summary>
+        <span class="advisor-tag tag-firstprinciples">First Principles</span>
+        Will this machine ever finish the job?
+      </summary>
+      <div class="advisor-body">
+        <p>The question assumes the bottleneck is the pipeline or the UI. Strip that assumption away.</p>
+        <p>You have 410+ chapters of a single web novel. At 11–17 s/line and roughly 50–200 lines per chapter, you are looking at 6–28 hours of compute per chapter, unattended, on a single machine with a hard VRAM sequencing constraint. The real question is not "what feature next?" — it is "will this machine ever finish the job?"</p>
+        <p>Do the math first. How many lines total across 410 chapters? Multiply by your median TTS time. If the answer is 300+ hours of GPU time, no UI improvement matters. No optimization that yields 2× speedup matters enough either unless it crosses a threshold where completion becomes realistic within your horizon.</p>
+        <p>First principles question: what is the actual goal? If it is "produce a complete Shadow Slave audiobook for personal enjoyment," the highest-leverage move is not more code — it is understanding whether this architecture can reach the finish line on this hardware within a realistic timeframe, and if not, what changes that calculus (cloud burst, a cheaper TTS model, scope reduction to favorite chapters only).</p>
+        <p>The README missing an audio demo is actually the most revealing signal here: you are building infrastructure for a product that does not yet exist in listenable form. Prove the end product works at scale before optimizing the factory.</p>
+        <p><strong>Concrete next move:</strong> run the completion math. If the number is acceptable, batch-run chapters autonomously. If not, that is the only problem worth solving.</p>
+      </div>
+    </details>
+
+    <details>
+      <summary>
+        <span class="advisor-tag tag-expansionist">Expansionist</span>
+        The demo gap is being wildly undervalued
+      </summary>
+      <div class="advisor-body">
+        <p>You have a working pipeline, a public repo, an MIT license, and a genuinely impressive technical story — local LLM diarization with per-line emotion vectors driving IndexTTS2. That combination is rare. But right now nobody can hear it, which means the repo's viral potential is essentially zero.</p>
+        <p>Add one 60–90 second audio sample to the README and you unlock a completely different trajectory. Web novel communities (Royal Road, Scribble Hub, Reddit's r/noveltranslations, the Shadow Slave Discord) will share it. TTS and audiobook hobbyist communities will share it. HuggingFace/GitHub ML crowds will star it. A working demo of emotion-vector-controlled zero-shot voice cloning on a 12 GB consumer GPU is genuinely interesting to a lot of people, not just Shadow Slave fans.</p>
+        <p>That audience expansion is the hidden upside. Right now the project solves a personal problem. A demo makes it a <em>reference implementation</em> — the thing people fork when they want to do this for their own EPUB library, their own fanfic, their own web novel.</p>
+        <p>From there the adjacent opportunity becomes obvious: a one-command Docker image or a <code>pip install</code> CLI that accepts any EPUB. The architecture already abstracts speaker/voice/emotion cleanly. The jump from "personal pipeline" to "the go-to open-source EPUB-to-audiobook tool with emotion synthesis" is not that far.</p>
+        <p>Performance optimization on 410 chapters is a treadmill. UI polish is invisible to anyone who hasn't cloned it yet. Get the demo out first. Everything else compounds on top of that.</p>
+      </div>
+    </details>
+
+    <details>
+      <summary>
+        <span class="advisor-tag tag-outsider">Outsider</span>
+        You have zero proof it works
+      </summary>
+      <div class="advisor-body">
+        <p>The README lacks an audio demo. That is the only thing that matters right now.</p>
+        <p>You have a public repo with zero proof it works. A visitor lands, reads "synthesizes speech with emotion vectors," sees a technical architecture diagram, and has no idea if the output sounds like a robot or a human. They close the tab. The performance numbers (11–17 s/line, 45 s/chapter) mean nothing without hearing what those seconds produced.</p>
+        <p>This is the classic expert blind spot: you know the output sounds good because you've heard it. Everyone else sees a pipeline description and assumes it's a toy project.</p>
+        <p>The "README lacks audio demo" note in your own memory file has been marked PENDING for two weeks. That delay tells me it feels optional. It is not optional — it is the entire value proposition made tangible.</p>
+        <p>The hidden priority: before optimizing performance or improving UI, you need one 60-second MP3 clip, publicly hosted, linked in the README with a single sentence: "Here's what chapter 264 sounds like." That single addition converts skeptics into interested contributors or users faster than any feature.</p>
+        <p>The audio demo isn't blocked on a free GPU. You already have processed chapters. Pick the best 60 seconds from chapter 264, export it, host it, link it. That's a 30-minute task you've been treating as a project.</p>
+      </div>
+    </details>
+
+    <details>
+      <summary>
+        <span class="advisor-tag tag-executor">Executor</span>
+        65–110 hours of compute left — batch throughput is the lever
+      </summary>
+      <div class="advisor-body">
+        <p>The numbers make the decision obvious: 655 pending chapters, 15 complete. The pipeline works but it's glacially slow at scale.</p>
+        <p>At 11–17 s/line and roughly 30–60 lines per chapter, you're looking at 6–10 minutes per chapter for TTS alone. 655 chapters unprocessed means 65–110 hours of compute left. That's the only number that matters right now.</p>
+        <p><strong>The Monday-morning move is batch throughput, not UI.</strong></p>
+        <ol>
+          <li><strong>Run the pipeline unattended overnight.</strong> Does it actually do that? If it crashes on error chapters and stops, fix the error-handling loop in the orchestrator so it skips and continues. One evening of work, potentially recovers 8+ hours of processing per night.</li>
+          <li><strong>Profile where time actually goes.</strong> Is the 11–17 s/line all GPU synthesis, or is there overhead (file I/O, voice resolution, WAV concatenation) eating 30–40% of it? If overhead is significant, it's free time to reclaim without touching the model.</li>
+          <li><strong>The audio demo blocker is real but second-priority.</strong> The README lacks a sample and the repo is public. Nobody will use or share a project with no audio proof. That's a 30-minute task once you pick 30 seconds of a completed chapter.</li>
+        </ol>
+        <p>UI is done. Performance optimization for throughput (not latency) is the lever. The hidden priority is unattended overnight batch running — if that's not bulletproof today, fix it first.</p>
+      </div>
+    </details>
+  </div>
+
+  <!-- PEER REVIEWS (collapsible) -->
+  <div class="reviews-section">
+    <h2>Peer Review Highlights</h2>
+    <details class="review">
+      <summary>Peer Reviews — All 5</summary>
+      <div class="review-body">
+        <p><strong>Reviewer 1:</strong></p>
+        <ol>
+          <li><strong>Strongest: C (Contrarian)</strong> — Only one that identifies actual technical risk at scale. Combines the completion math with concrete failure mode analysis, not just "batch throughput matters."</li>
+          <li><strong>Biggest blind spot: E (Outsider)</strong> — Treats the audio demo as the <em>only</em> thing that matters. A repo with an audio clip but a pipeline that dies after 6 hours is still a dead project. Rushing a mediocre clip could hurt credibility.</li>
+          <li><strong>All five missed:</strong> Copyright. Shadow Slave is licensed. Publishing synthesized audio publicly may violate the author's rights. MIT covers the pipeline code, not derivative audio works.</li>
+        </ol>
+        <br>
+        <p><strong>Reviewer 2:</strong></p>
+        <ol>
+          <li><strong>Strongest: C (Contrarian)</strong> — Correctly identifies specific technical failure modes and connects to the actual risk of a multi-week batch dying at hour 6.</li>
+          <li><strong>Biggest blind spot: E (Outsider)</strong> — Ignores that the user's goal is personal enjoyment of 410 chapters, not repo traction. Optimizing for GitHub stars when the pipeline can't survive an overnight run is exactly backwards.</li>
+          <li><strong>All five missed:</strong> None of them asked whether the pipeline currently runs unattended at all. The actual first move is an observed overnight batch run to collect failure data. Measure before prescribing.</li>
+        </ol>
+        <br>
+        <p><strong>Reviewer 3:</strong></p>
+        <ol>
+          <li><strong>Strongest: C (Contrarian)</strong> — Only one that identifies actual technical risk, names failure modes, quantifies the ~350 hour run time.</li>
+          <li><strong>Biggest blind spot: E (Outsider)</strong> — Treats audio demo as singular unlock; ignores the user's own stated blocker (voice choice + free GPU). Not a 30-minute task.</li>
+          <li><strong>All five missed:</strong> Chapter ordering strategy. With 410+ chapters unprocessed, prioritizing in reading order means every completed chapter is immediately useful. Zero-code, zero-cost.</li>
+        </ol>
+        <br>
+        <p><strong>Reviewer 4:</strong></p>
+        <ol>
+          <li><strong>Strongest: C (Contrarian)</strong> — Thinks through failure modes at scale, names specific failure modes (VRAM barrier hang, GGUF context overflow, silent FFmpeg corruption).</li>
+          <li><strong>Biggest blind spot: E (Outsider)</strong> — Ignores that memory file says demo is "blocked on user's voice choice + free GPU."</li>
+          <li><strong>All five missed:</strong> Does the EPUB source stay current? Shadow Slave is an ongoing serial. Every new chapter may require manual re-parse. If manual, the ops burden compounds indefinitely.</li>
+        </ol>
+        <br>
+        <p><strong>Reviewer 5:</strong></p>
+        <ol>
+          <li><strong>Strongest: C (Contrarian)</strong> — Identifies the real constraint: pipeline must run unattended for weeks. Names failure modes. Quantifies the math.</li>
+          <li><strong>Biggest blind spot: D (Expansionist)</strong> — Argues audio demo unlocks viral growth, but distributing audio of copyrighted content publicly raises real copyright questions.</li>
+          <li><strong>All five missed:</strong> Storage and disk I/O at scale. 410 chapters × 200 lines × WAV files = 80,000+ intermediate files and potentially 30–60 GB of disk. Could become the binding constraint before GPU time.</li>
+        </ol>
+      </div>
+    </details>
+  </div>
+
+  <div class="footer">
+    LLM Council &nbsp;·&nbsp; June 15, 2026 &nbsp;·&nbsp; council-report-20260615.html<br>
+    Methodology by Andrej Karpathy · Adapted for Claude Code by @olelehmann · Published by @tenfoldmarc
+  </div>
+
+</div>
+</body>
+</html>
