@@ -27,8 +27,12 @@ Robustness rules:
 
 import re
 
-# Straight double quotes pair with straight, curly with curly.
-_QUOTE_PAIRS = {'"': '"', "“": "”"}  # " -> ",  “ -> ”
+# Every double-quote glyph, treated as one class. The source EPUB is mostly
+# straight quotes but contains "wrong-handed" curly spans where dialogue opens
+# with the right-curly quote (”…) — a known e-book conversion corruption. Pairing
+# by *position* rather than by matching glyph keeps those spans as dialogue
+# instead of silently narrating them as prose (ch_1842/ch_244 regression).
+_DOUBLE_QUOTES = '"“”'  # U+0022 straight, U+201C left-curly, U+201D right-curly
 
 # A paragraph made only of [bracket] spans (one or more), whitespace, and
 # optional stray trailing punctuation ("[X.]." appears in the source).
@@ -54,31 +58,28 @@ KIND_PROSE = "prose"
 def _split_quoted_paragraph(para: str) -> "list[tuple[str, str]]":
     """
     Split one paragraph into (kind, text) parts on double-quote spans.
-    Returns the whole paragraph as a single prose part when any quote is
-    unbalanced, so no text is ever lost or misattached.
+
+    Double-quote glyphs are paired by position (1st opens, 2nd closes, 3rd
+    opens, ...), so handedness never matters — this tolerates the source EPUB's
+    wrong-handed curly spans. An odd number of quotes means the paragraph is
+    unbalanced: return it as a single prose part so no text is lost or
+    misattached (never guess at span boundaries).
     """
+    positions = [i for i, ch in enumerate(para) if ch in _DOUBLE_QUOTES]
+    if len(positions) % 2 != 0:
+        return [(KIND_PROSE, para.strip())] if para.strip() else []
+
     parts: list[tuple[str, str]] = []
     buf_start = 0
-    i = 0
-    n = len(para)
-    while i < n:
-        ch = para[i]
-        if ch in _QUOTE_PAIRS:
-            closer = _QUOTE_PAIRS[ch]
-            end = para.find(closer, i + 1)
-            if end == -1:
-                # Unbalanced quote -> whole paragraph is prose.
-                return [(KIND_PROSE, para.strip())] if para.strip() else []
-            before = para[buf_start:i].strip()
-            if before:
-                parts.append((KIND_PROSE, before))
-            spoken = para[i + 1 : end].strip()
-            if spoken:
-                parts.append((KIND_DIALOGUE, spoken))
-            i = end + 1
-            buf_start = i
-        else:
-            i += 1
+    for k in range(0, len(positions), 2):
+        open_i, close_i = positions[k], positions[k + 1]
+        before = para[buf_start:open_i].strip()
+        if before:
+            parts.append((KIND_PROSE, before))
+        spoken = para[open_i + 1 : close_i].strip()
+        if spoken:
+            parts.append((KIND_DIALOGUE, spoken))
+        buf_start = close_i + 1
     tail = para[buf_start:].strip()
     if tail:
         parts.append((KIND_PROSE, tail))

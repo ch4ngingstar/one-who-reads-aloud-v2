@@ -87,6 +87,33 @@ def test_segment_curly_quotes():
     print("  PASS test_segment_curly_quotes")
 
 
+def test_segment_wrong_handed_curly_open_straight_close():
+    # Real corruption seen in ch_1842/ch_244: dialogue OPENS with the right-curly
+    # quote (U+201D) and CLOSES with a straight quote. Must still be dialogue, not
+    # narrated as prose in the Narrator voice.
+    segs = segment_chunk('”I see. That Memory is serving my husband well."')
+    assert [s["kind"] for s in segs] == ["dialogue"]
+    assert segs[0]["text"] == "I see. That Memory is serving my husband well."
+    print("  PASS test_segment_wrong_handed_curly_open_straight_close")
+
+
+def test_segment_wrong_handed_curly_both_right():
+    # Both delimiters are the right-curly quote (U+201D ... U+201D).
+    segs = segment_chunk('”The realm boundary is close. How long will it take?”')
+    assert [s["kind"] for s in segs] == ["dialogue"]
+    assert segs[0]["text"] == "The realm boundary is close. How long will it take?"
+    print("  PASS test_segment_wrong_handed_curly_both_right")
+
+
+def test_segment_wrong_handed_with_prose_tail():
+    # Wrong-handed opener with an attribution tail still splits dialogue + prose.
+    segs = segment_chunk('”Stop right there!” the guard shouted.')
+    assert [s["kind"] for s in segs] == ["dialogue", "prose"]
+    assert segs[0]["text"] == "Stop right there!"
+    assert segs[1]["text"] == "the guard shouted."
+    print("  PASS test_segment_wrong_handed_with_prose_tail")
+
+
 def test_segment_apostrophes_not_split():
     segs = segment_chunk("It wasn't Sunny's fault, and he didn't care.")
     assert len(segs) == 1 and segs[0]["kind"] == "prose"
