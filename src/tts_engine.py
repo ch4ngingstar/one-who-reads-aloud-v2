@@ -221,11 +221,14 @@ _DEFAULT_CFG = {
     "emo_alpha_scale": 1.0,    # global multiplier on per-emotion alpha (master dial)
     "config_name":    "config.yaml",  # IndexTTS2 config filename inside model_dir
     # GPT sampling — tuned for smoother long-form narration. Larger segments mean
-    # fewer prosody seams (IndexTTS2 default 120 chops mid-sentence). Beams stay
-    # at the IndexTTS2 default 3: 5 cost ~1.6× generation time for marginal gain
-    # (~90 min chapters with fp32). Passed straight to IndexTTS2.infer().
+    # fewer prosody seams (IndexTTS2 default 120 chops mid-sentence).
+    # num_beams=1 (greedy): A/B testing showed beam search is the dominant cost
+    # here (~10× slower per line) AND flattens emotional prosody — beam search
+    # optimises for the most-probable sequence, which averages out expressive
+    # delivery. Greedy is faster, lower-VRAM, and more dynamic on emotional lines.
+    # Passed straight to IndexTTS2.infer().
     "max_text_tokens_per_segment": 200,
-    "num_beams":      3,
+    "num_beams":      1,
     "db_flush_every": 10,   # write tts_done updates to DB every N lines (resume granularity)
 }
 
