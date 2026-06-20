@@ -235,6 +235,12 @@ _DEFAULT_CFG = {
     "max_retries":    2,       # retries on a failed generation
     "max_line_chars": 400,     # lines longer than this are split at sentence boundaries
     "emo_alpha_scale": 1.0,    # global multiplier on per-emotion alpha (master dial)
+    # Narration is description, not performance. Even when the diarizer assigns a
+    # charged tag to Narrator prose (horror/battle passages), full-intensity
+    # emotion makes the narrator over-act and read too loud (ch_1854 ~3:46 was
+    # frightened narration). Scale the Narrator's emo_alpha down so it stays
+    # measured; character dialogue is unaffected. 0.0 = always-neutral narration.
+    "narrator_emo_scale": 0.5,
     "config_name":    "config.yaml",  # IndexTTS2 config filename inside model_dir
     # GPT sampling — tuned for smoother long-form narration. Larger segments mean
     # fewer prosody seams (IndexTTS2 default 120 chops mid-sentence).
@@ -501,6 +507,10 @@ class TTSEngine:
             raw_text              = _normalize_text(line["text"])
             emo_vector, emo_alpha = self._resolve_emotion(line["emotion"])
             emo_alpha            *= self.cfg["emo_alpha_scale"]
+            # Keep narration measured — damp the narrator's emotional intensity so
+            # charged prose (e.g. frightened horror description) never over-acts.
+            if _canonical == "Narrator":
+                emo_alpha *= self.cfg["narrator_emo_scale"]
 
             max_chars = self.cfg["max_line_chars"]
             segments  = self._split_long_line(raw_text, max_chars)

@@ -160,6 +160,40 @@ def test_emo_alpha_scale_applied():
     print("  PASS test_emo_alpha_scale_applied")
 
 
+def test_narrator_emotion_damped():
+    """Narration is description, not performance: the Narrator's emo_alpha is
+    scaled down so a charged tag (e.g. frightened horror prose) never over-acts,
+    while a character speaking the same emotion keeps full intensity."""
+    sm = _tmp_sm()
+    ref_wav = _tmp_wav()
+    sm.set_voice("Narrator", str(ref_wav))
+    sm.set_voice("Sunny", str(ref_wav))
+
+    ch_id = _seed_diarized_chapter(sm, [
+        {"line_index": 0, "speaker": "Narrator", "text": "Dread filled the hall.", "emotion": "frightened"},
+        {"line_index": 1, "speaker": "Sunny", "text": "Run!", "emotion": "frightened"},
+    ])
+
+    captured = {}
+    def capture(text, ref, emo_vector=None, emo_alpha=0.0):
+        captured[text] = emo_alpha
+        return _wav_silence()
+
+    base = INDEXTTS2_EMOTION_VECTORS["frightened"][1]
+    with tempfile.TemporaryDirectory() as out_dir:
+        engine = _make_engine(sm, out_dir, mock_synth=capture)
+        scale = engine.cfg.get("narrator_emo_scale", 0.5)
+        engine.process_chapter(ch_id)
+
+    assert scale < 1.0, "narrator_emo_scale must damp (<1.0)"
+    assert abs(captured["Dread filled the hall."] - base * scale) < 1e-6, (
+        f"Narrator alpha should be damped to {base*scale}, got {captured['Dread filled the hall.']}")
+    assert abs(captured["Run!"] - base) < 1e-6, (
+        f"Character alpha should stay full {base}, got {captured['Run!']}")
+    ref_wav.unlink(missing_ok=True)
+    print("  PASS test_narrator_emotion_damped")
+
+
 # ── Voice resolution tests ────────────────────────────────────────────────────
 
 def test_resolve_ref_audio_primary():
@@ -650,6 +684,7 @@ TESTS = [
     test_resolve_emotion_angry_has_anger_component,
     test_synthesize_receives_emotion_vector,
     test_emo_alpha_scale_applied,
+    test_narrator_emotion_damped,
     test_resolve_ref_audio_primary,
     test_resolve_ref_audio_emotion_override,
     test_resolve_ref_audio_falls_back_to_primary,
