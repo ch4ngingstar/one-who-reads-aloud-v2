@@ -77,17 +77,20 @@ INDEXTTS2_EMOTION_VECTORS: dict[str, "tuple[list[float], float]"] = {
     #            [hap, ang, sad, afr, dis, mel, sur, calm]
     "neutral":   ([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 0.0),
     "whispers":  ([0.0, 0.0, 0.1, 0.0, 0.0, 0.2, 0.0, 0.6], 0.45),
-    "angry":     ([0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 0.65),
+    # Retuned 2026-06-20: lowered emo_alpha + added a calm anchor on the 5 "hot"
+    # tags whose objective f0 lift hit +94..+135 Hz (Sunny neutral ~125 Hz → near
+    # falsetto 220-260 Hz). See docs/eval-report-2026-06-20.md / eval_emotion.py.
+    "angry":     ([0.0, 0.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2], 0.45),
     "sad":       ([0.0, 0.0, 0.9, 0.0, 0.0, 0.3, 0.0, 0.0], 0.65),
-    "excited":   ([0.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.0], 0.65),
+    "excited":   ([0.6, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3, 0.1], 0.45),
     "commanding":([0.0, 0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.6], 0.60),
-    "frightened":([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.2, 0.0], 0.70),
+    "frightened":([0.0, 0.0, 0.0, 0.7, 0.0, 0.0, 0.15, 0.15], 0.50),
     "confused":  ([0.0, 0.0, 0.0, 0.2, 0.0, 0.2, 0.5, 0.0], 0.55),
     "pleading":  ([0.0, 0.0, 0.6, 0.3, 0.0, 0.0, 0.0, 0.0], 0.65),
     "cold":      ([0.0, 0.15, 0.0, 0.0, 0.1, 0.1, 0.0, 0.6], 0.45),
-    "laughing":  ([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3, 0.0], 0.65),
+    "laughing":  ([0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.05], 0.45),
     "sarcastic": ([0.3, 0.2, 0.0, 0.0, 0.3, 0.0, 0.0, 0.3], 0.55),
-    "desperate": ([0.0, 0.0, 0.5, 0.6, 0.0, 0.2, 0.0, 0.0], 0.70),
+    "desperate": ([0.0, 0.0, 0.45, 0.45, 0.0, 0.2, 0.0, 0.1], 0.50),
 }
 
 
@@ -186,6 +189,9 @@ SPEAKER_ALIASES: dict[str, str] = {
     "Npc_Wanderer":       "The Dream Realm Wanderer",
     "Npc_Monster":        "The Nightmare Abomination",
     "Unknown":            "_default",
+
+    # Post-Vol-9 character title variants (canonical names added to DEFAULT_SPEAKERS).
+    "Saint Jest":         "Jest",
 
     # Corrupted / monster entities
     "Abomination":        "The Nightmare Abomination",
