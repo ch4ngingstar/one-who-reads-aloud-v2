@@ -240,7 +240,8 @@ _DEFAULT_CFG = {
     # emotion makes the narrator over-act and read too loud (ch_1854 ~3:46 was
     # frightened narration). Scale the Narrator's emo_alpha down so it stays
     # measured; character dialogue is unaffected. 0.0 = always-neutral narration.
-    "narrator_emo_scale": 0.5,
+    # 0.3 chosen by ear from a 1.0/0.5/0.3/0.0 A/B on the ch_1854 frightened line.
+    "narrator_emo_scale": 0.3,
     "config_name":    "config.yaml",  # IndexTTS2 config filename inside model_dir
     # GPT sampling — tuned for smoother long-form narration. Larger segments mean
     # fewer prosody seams (IndexTTS2 default 120 chops mid-sentence).
