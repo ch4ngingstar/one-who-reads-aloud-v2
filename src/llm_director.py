@@ -144,8 +144,16 @@ Nephis   : commanding default / cold / neutral -- always composed
 Cassie   : sad / pleading / neutral -- gentle, soft-spoken
 Effie    : excited default / neutral -- energetic
 Kai      : neutral / commanding -- calm, professional
-Dialogue emotion follows the words: questions -> confused, threats -> cold or angry,
-shouting -> angry or excited, hushed speech -> whispers.
+Dialogue emotion follows the words AND the manner-cue in the attribution around it.
+- A manner-cue in the [P] segment right before or after a [D] line sets that line's tone:
+  "whispered"/"murmured"/"hushed" -> whispers; "shouted"/"barked"/"roared" -> angry or
+  excited; "pleaded"/"begged" -> pleading; "said coldly"/"hissed" -> cold. The cue usually
+  sits in the PREVIOUS or NEXT prose segment, NOT inside the spoken words -- carry it onto
+  the [D] line instead of defaulting to the speaker's usual tone.
+- questions -> confused ONLY when the speaker is genuinely uncertain or seeking an answer.
+  A rhetorical, rote, or commanding question keeps the speaker's default tone (a cold threat
+  phrased as a question stays cold; a calm clarifying question stays neutral).
+- threats -> cold or angry; shouting -> angry or excited; hushed speech -> whispers.
 
 == EXAMPLE 1 ==
 Input:
@@ -181,6 +189,21 @@ Output:
 {{"i":4,"speaker":"Narrator","emotion":"neutral"}},
 {{"i":5,"speaker":"Unknown","emotion":"neutral"}}]}}
 Note: "Riven" introduces himself but is NOT in the roster -> Unknown, not a new name.
+
+== EXAMPLE 3 (manner-cue carries onto the spoken line) ==
+Input:
+0 [P] Cassie leaned close and whispered into his ear.
+1 [D] They are watching us. Say nothing.
+2 [P] Sunny gave a slow nod, then asked evenly.
+3 [D] How many?
+Output:
+{{"labels":[
+{{"i":0,"speaker":"Narrator","emotion":"neutral"}},
+{{"i":1,"speaker":"Cassie","emotion":"whispers"}},
+{{"i":2,"speaker":"Narrator","emotion":"neutral"}},
+{{"i":3,"speaker":"Sunny","emotion":"neutral"}}]}}
+Note: the "whispered" cue sits in the PREVIOUS [P] segment -> carry it onto line 1. Line 3
+is a calm clarifying question ("asked evenly") -> neutral, NOT confused.
 
 == OUTPUT ==
 Return ONLY this JSON object, with exactly one label per input segment, in order:
