@@ -105,6 +105,26 @@ cd src; python -m uvicorn api:app --port 8000 --reload
 cd ui;  npm run dev
 ```
 
+## Diarizing without the local LLM (external / Claude API)
+
+If you can't — or would rather not — run the local 14&nbsp;GB diarization model (limited VRAM, unreliable power), label chapters elsewhere and import the result. The text always stays verbatim from the EPUB; the external source only supplies **speaker + emotion**, applied by segment index, and runs through the same safety net as the local LLM.
+
+```powershell
+# 1. Export a chapter's segments  (or use the UI inspector's "External Diarization" panel)
+#    GET http://localhost:8000/api/chapters/<id>/segments
+
+# 2a. Label them with the Claude API  (resumable; skips already-labeled chapters)
+pip install anthropic
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+python scripts/diarize_io.py format-cloud --in data/diar_export --model claude-opus-4-8
+
+# 2b. ...or label by hand / with any other tool, matching the exported schema
+
+# 3. Import the labels  (re-segments the chunks, applies labels by index; the orchestrator
+#    then skips the LLM stage). POST http://localhost:8000/api/chapters/<id>/labels,
+#    or upload the label files in the same UI panel.
+```
+
 ## Tests
 
 Nothing in the test suite needs a GPU — the LLM call and the synthesizer are monkeypatched.
@@ -119,13 +139,16 @@ cd ui && npm test && npm run typecheck
 
 ## Changelog
 
-### [v0.1.0](https://github.com/ch4ngingstar/one-who-reads-aloud-v2/releases/tag/v0.1.0) — Correctness & emotion-quality pass
+### [v0.1.0](https://github.com/ch4ngingstar/one-who-reads-aloud-v2/releases/tag/v0.1.0) — First release
 
-First tagged release. A correctness, emotion-quality, and reliability pass on the diarization + TTS stages:
+First tagged release: a major new feature plus a correctness, emotion-quality, performance, and reliability pass.
 
-- **Diarization correctness** — the segmenter pairs double-quotes by position, so "wrong-handed" curly dialogue (opening with `”`) is read as dialogue instead of in the Narrator voice; emotion labels now carry a prose manner-cue ("whispered"/"shouted") onto the spoken line and treat `questions → confused` tone-aware (ch_264 gold: emotion accuracy 82.8% → 84.4%, speaker accuracy 98.4% unchanged).
-- **Emotion quality** — retuned the weak emotion vectors (whispers/sad/pleading/cold) for a measurable, appropriate prosody change without near-falsetto overshoot, plus a `narrator_emo_scale` so narration stays measured while character dialogue keeps full intensity.
-- **Reliability** — fixed a Windows cp1252 crash that aborted runs on any fallback/NPC-voice line, and added `SPEAKER_ALIASES` resolution coverage.
+- **External diarization (bring your own labels / Claude API)** — diarize a chapter without the local 14&nbsp;GB LLM: export segments, label them via the Claude API / another tool / by hand, and import them back (see the section above). Text stays verbatim; only speaker + emotion come from outside.
+- **Correctness audit** — a read-only QA gate (CLI + API) that checks a chapter/project for integrity issues without mutating pipeline state.
+- **Faster TTS** — greedy decoding (`num_beams` 3 → 1) is several times faster per line and *more* expressive on emotional lines (beam search averaged out delivery).
+- **Diarization correctness** — the segmenter pairs double-quotes by position, so "wrong-handed" curly dialogue (opening with `”`) is read as dialogue, not narration; emotion labels carry a prose manner-cue ("whispered"/"shouted") onto the spoken line and treat `questions → confused` tone-aware (ch_264: emotion accuracy 82.8% → 84.4%, speaker 98.4% unchanged); a line is never skipped — unmapped/NPC speakers fall back to a real voice.
+- **Emotion quality** — retuned the hot vectors (kill near-falsetto overshoot) and the weak ones (whispers/sad/pleading/cold), plus a `narrator_emo_scale` so narration stays measured while character dialogue keeps full intensity.
+- **Roster & reliability** — added post-Vol-9 speakers (Jest, Seishan, Helie, Beastmaster) and `SPEAKER_ALIASES` coverage; fixed a Windows cp1252 crash that aborted runs on any fallback/NPC-voice line.
 
 ## A note on the content
 
