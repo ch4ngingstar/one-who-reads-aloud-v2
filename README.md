@@ -126,7 +126,6 @@ First tagged release. A correctness, emotion-quality, and reliability pass on th
 - **Diarization correctness** — the segmenter pairs double-quotes by position, so "wrong-handed" curly dialogue (opening with `”`) is read as dialogue instead of in the Narrator voice; emotion labels now carry a prose manner-cue ("whispered"/"shouted") onto the spoken line and treat `questions → confused` tone-aware (ch_264 gold: emotion accuracy 82.8% → 84.4%, speaker accuracy 98.4% unchanged).
 - **Emotion quality** — retuned the weak emotion vectors (whispers/sad/pleading/cold) for a measurable, appropriate prosody change without near-falsetto overshoot, plus a `narrator_emo_scale` so narration stays measured while character dialogue keeps full intensity.
 - **Reliability** — fixed a Windows cp1252 crash that aborted runs on any fallback/NPC-voice line, and added `SPEAKER_ALIASES` resolution coverage.
-- **Evaluation harness** — accuracy (WER), emotion (prosody deltas), voice-consistency, formatting-vs-gold, and roster scorers with hand-labeled gold sets.
 
 ## A note on the content
 
