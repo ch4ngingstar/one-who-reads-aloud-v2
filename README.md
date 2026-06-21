@@ -117,6 +117,17 @@ pytest
 cd ui && npm test && npm run typecheck
 ```
 
+## Changelog
+
+### [v0.1.0](https://github.com/ch4ngingstar/one-who-reads-aloud-v2/releases/tag/v0.1.0) — Correctness & emotion-quality pass
+
+First tagged release. A correctness, emotion-quality, and reliability pass on the diarization + TTS stages:
+
+- **Diarization correctness** — the segmenter pairs double-quotes by position, so "wrong-handed" curly dialogue (opening with `”`) is read as dialogue instead of in the Narrator voice; emotion labels now carry a prose manner-cue ("whispered"/"shouted") onto the spoken line and treat `questions → confused` tone-aware (ch_264 gold: emotion accuracy 82.8% → 84.4%, speaker accuracy 98.4% unchanged).
+- **Emotion quality** — retuned the weak emotion vectors (whispers/sad/pleading/cold) for a measurable, appropriate prosody change without near-falsetto overshoot, plus a `narrator_emo_scale` so narration stays measured while character dialogue keeps full intensity.
+- **Reliability** — fixed a Windows cp1252 crash that aborted runs on any fallback/NPC-voice line, and added `SPEAKER_ALIASES` resolution coverage.
+- **Evaluation harness** — accuracy (WER), emotion (prosody deltas), voice-consistency, formatting-vs-gold, and roster scorers with hand-labeled gold sets.
+
 ## A note on the content
 
 This repo contains code only — no novel text, no audio, no model weights. You supply your own EPUB and voice clips. *Shadow Slave* is the work of Guiltythree; go read it on [Webnovel](https://www.webnovel.com/book/shadow-slave_21880912006091605).
