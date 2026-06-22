@@ -69,6 +69,23 @@ DEFAULT_SPEAKERS = [
     # Post-Vol-9 speakers (added 2026-06-20 from eval_roster.py EPUB audit:
     # text occurrences Jest 698, Seishan 248, Helie 128, Beastmaster 105).
     "Jest", "Seishan", "Helie", "Beastmaster",
+    # Post-Vol-8 speakers (added 2026-06-23 from vol9/10/11 EPUB audit, ranked by
+    # speech-verb adjacency: Anvil 15, Eurys 15, Ki Song 12, Naeve 9 (+30 as the
+    # epithet "Nightwalker"), Moonveil 7, Warden 7, Bloodwave 4). Voices resolve
+    # via SPEAKER_ALIASES in tts_engine.py (Anvil->Lord Valor, etc.).
+    "Anvil", "Ki Song", "Eurys", "Naeve", "Bloodwave", "Moonveil", "Warden",
+]
+
+# Non-roster speaker archetypes. The diarizer routes an UNNAMED / non-roster
+# speaker to the best-fitting archetype (instead of the single flat "Unknown"),
+# which the TTS engine maps to a distinct fallback voice. Order is irrelevant.
+# These names are registered in the voice map and resolve directly.
+NPC_ARCHETYPES = [
+    "The Hardened Awakened",     # veteran soldiers, government hunters, guards
+    "The Bureaucrat",            # academy instructors, officials, clerks
+    "The Legacy Noble",          # Valor / Song clan members, aristocrats
+    "The Dream Realm Wanderer",  # scavengers, Sleepers, desperate survivors
+    "The Nightmare Abomination", # generic corrupted / monsters that speak
 ]
 
 EMOTION_VOCAB = [
@@ -116,15 +133,27 @@ audiobook. You NEVER output text -- only one speaker and one emotion label per s
 == SPEAKERS (use EXACTLY these names, nothing else) ==
 {speakers}
 
+== NPC ARCHETYPES (for UNNAMED / non-roster speakers -- pick the best fit) ==
+{archetypes}
+Use an archetype ONLY when the speaker is not a named roster character above. Match by role:
+- The Hardened Awakened  : soldiers, hunters, guards, mercenaries, veteran fighters.
+- The Bureaucrat         : officials, academy instructors, clerks, administrators, hosts.
+- The Legacy Noble       : clan members & aristocrats (Valor, Song, Ki, the great houses).
+- The Dream Realm Wanderer: scavengers, Sleepers, slaves, desperate survivors.
+- The Nightmare Abomination: monsters, demons, the corrupted, hostile entities that speak.
+When none clearly fits an unnamed speaker -> Unknown.
+
 == EMOTIONS ==
 {emotions}
 
 == ATTRIBUTION RULES ==
 A1 Attribution tails name the speaker. In `1 [D] Wait, / 2 [P] Sunny said`, segment 1 is Sunny.
 A2 With no tail, follow conversation flow: two characters in a scene usually alternate turns.
-A3 Only roster names are allowed. Guards, strangers, crowd members, servants, or any
-   unnamed/unlisted character -> Unknown. NEVER pick a roster name just because that
-   character is mentioned nearby. When unsure -> Unknown.
+A3 Roster names are for NAMED roster characters only. For an unnamed or non-roster
+   speaker (guard, stranger, crowd member, servant, soldier, official, monster), pick the
+   best-fitting NPC archetype; if none fits -> Unknown. NEVER pick a roster name just
+   because that character is mentioned nearby -- an introduced-but-unlisted name (e.g.
+   "Riven") is NOT a roster member -> archetype or Unknown.
 A4 [P] segments are Narrator. ONE exception: a [P] segment that is clearly Sunny's direct
    inner thought, phrased in first person ("Why me?", "I have to run.") may be labeled Sunny.
    Third-person prose about Sunny ("Sunny walked...", "He sighed...") is ALWAYS Narrator.
@@ -155,6 +184,18 @@ Dialogue emotion follows the words AND the manner-cue in the attribution around 
   phrased as a question stays cold; a calm clarifying question stays neutral).
 - threats -> cold or angry; shouting -> angry or excited; hushed speech -> whispers.
 
+== EPITHET GLOSSARY (later volumes name characters by TITLE -- map the title to the name) ==
+Sunny: Sunless, Lord of Shadows, the Shadow, Sir/Detective Sunless, Devil of Antarctica.
+Nephis: Changing Star, the Saint of Light, Lady Nephis.
+Cassie: Song of the Fallen, the Seer, Saint Cassia. Effie: Athena, Raised by Wolves.
+Kai: Nightingale. Jet: Soul Reaper, Boss. Morgan: Princess/Saint Morgan.
+Mordret: Prince of Nothing (his "Reflections" / "Other Mordret" -> Mordret).
+Anvil: King of Swords, Lord/King Valor. Ki Song: Queen of Beasts, Queen of Song.
+Eurys: Eurys of the Nine. Naeve: the Nightwalker, Saint Naeve. Revel: the Dirge.
+Tyris: Sky Tide. Tamar: Lady Tamar. The Nightmare Spell: the Weaver, the System.
+A title resolves to the roster name; if the title belongs to nobody on the roster, treat
+the speaker as an NPC archetype or Unknown -- never invent a new roster name.
+
 == EXAMPLE 1 ==
 Input:
 0 [P] Sunny stared at the runes, his expression unreadable.
@@ -172,7 +213,7 @@ Output:
 {{"i":4,"speaker":"The Nightmare Spell","emotion":"cold"}},
 {{"i":5,"speaker":"Sunny","emotion":"cold"}}]}}
 
-== EXAMPLE 2 (non-roster speakers -> Unknown) ==
+== EXAMPLE 2 (non-roster speakers -> archetype or Unknown) ==
 Input:
 0 [P] The guards exchanged uneasy glances.
 1 [D] Who goes there?
@@ -183,12 +224,13 @@ Input:
 Output:
 {{"labels":[
 {{"i":0,"speaker":"Narrator","emotion":"neutral"}},
-{{"i":1,"speaker":"Unknown","emotion":"commanding"}},
+{{"i":1,"speaker":"The Hardened Awakened","emotion":"commanding"}},
 {{"i":2,"speaker":"Narrator","emotion":"neutral"}},
 {{"i":3,"speaker":"Sunny","emotion":"cold"}},
 {{"i":4,"speaker":"Narrator","emotion":"neutral"}},
 {{"i":5,"speaker":"Unknown","emotion":"neutral"}}]}}
-Note: "Riven" introduces himself but is NOT in the roster -> Unknown, not a new name.
+Note: the unnamed guard is a soldier -> The Hardened Awakened. "Riven" introduces himself
+but is NOT in the roster and his role is unclear -> Unknown, never a new roster name.
 
 == EXAMPLE 3 (manner-cue carries onto the spoken line) ==
 Input:
@@ -205,6 +247,21 @@ Output:
 Note: the "whispered" cue sits in the PREVIOUS [P] segment -> carry it onto line 1. Line 3
 is a calm clarifying question ("asked evenly") -> neutral, NOT confused.
 
+== EXAMPLE 4 (epithet -> roster name; unnamed -> archetype) ==
+Input:
+0 [P] The Changing Star regarded the soldier coldly.
+1 [D] Report. How many did we lose?
+2 [P] The grizzled veteran lowered his head.
+3 [D] Thirty, my Saint. The Hollows broke through the eastern wall.
+Output:
+{{"labels":[
+{{"i":0,"speaker":"Narrator","emotion":"neutral"}},
+{{"i":1,"speaker":"Nephis","emotion":"commanding"}},
+{{"i":2,"speaker":"Narrator","emotion":"neutral"}},
+{{"i":3,"speaker":"The Hardened Awakened","emotion":"frightened"}}]}}
+Note: "Changing Star" is the epithet for Nephis -> Nephis. The unnamed veteran soldier ->
+The Hardened Awakened (not Unknown, not a roster name).
+
 == OUTPUT ==
 Return ONLY this JSON object, with exactly one label per input segment, in order:
 {{"labels":[{{"i":0,"speaker":"...","emotion":"..."}}]}}"""
@@ -214,12 +271,13 @@ def _build_system_prompt(speakers: "list[str]") -> str:
     roster = ["Narrator"] + list(speakers) + ["Unknown", SYSTEM_SPEAKER]
     return _SYSTEM_PROMPT.format(
         speakers="\n".join(roster),
+        archetypes="\n".join(NPC_ARCHETYPES),
         emotions=", ".join(EMOTION_VOCAB),
     )
 
 
 def _allowed_speakers(speakers: "list[str]") -> "set[str]":
-    return {"Narrator", "Unknown", SYSTEM_SPEAKER, *speakers}
+    return {"Narrator", "Unknown", SYSTEM_SPEAKER, *NPC_ARCHETYPES, *speakers}
 
 
 def _label_json_schema(speakers: "list[str]") -> dict:

@@ -203,6 +203,16 @@ SPEAKER_ALIASES: dict[str, str] = {
     # Post-Vol-9 character title variants (canonical names added to DEFAULT_SPEAKERS).
     "Saint Jest":         "Jest",
 
+    # Post-Vol-8 cast (vol9-11). Roster names map to the registered voice keys.
+    "Naeve":              "Saint Naeve",
+    "Nightwalker":        "Saint Naeve",   # "the Nightwalker" is Naeve's epithet
+    "The Nightwalker":    "Saint Naeve",
+    "Bloodwave":          "Saint Bloodwave",
+    "Detective Sunless":  "Sunny",         # Sunny's undercover identity (vol10 Mirage arc)
+    "Sir Sunless":        "Sunny",
+    "Princess Moonveil":  "Moonveil",      # no clip yet -> falls back until registered
+    "Warden Of Valor":    "Warden",        # no clip yet -> falls back until registered
+
     # Corrupted / monster entities
     "Abomination":        "The Nightmare Abomination",
     "Corrupted":          "The Nightmare Abomination",
