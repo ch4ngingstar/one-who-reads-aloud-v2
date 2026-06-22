@@ -124,6 +124,7 @@ function ExternalDiarization({ chapter, onChanged }: {
 }) {
   const [results, setResults] = useState<LabelResult[]>([])
   const [busy, setBusy] = useState(false)
+  const [force, setForce] = useState(false)
   const padded = String(chapter.id).padStart(4, '0')
 
   async function handleUpload(files: FileList | null) {
@@ -139,7 +140,7 @@ function ExternalDiarization({ chapter, onChanged }: {
       const chapterId = parseInt(m[1], 10)
       try {
         const body = JSON.parse(await file.text())
-        const data = await importChapterLabels(chapterId, body)
+        const data = await importChapterLabels(chapterId, body, force)
         out.push({ name: file.name, ok: true, message: `diarized (${data.lines} lines)` })
       } catch (err) {
         out.push({ name: file.name, ok: false, message: err instanceof Error ? err.message : String(err) })
@@ -173,6 +174,15 @@ function ExternalDiarization({ chapter, onChanged }: {
           />
         </label>
       </div>
+      <label className="flex items-center gap-1.5 mt-2 text-[10px] text-spell-g5 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={force}
+          disabled={busy}
+          onChange={e => setForce(e.target.checked)}
+        />
+        force overwrite (re-import past diarized — clears existing audio)
+      </label>
       {results.length > 0 && (
         <div className="mt-2.5 space-y-1">
           {results.map(r => (
@@ -187,6 +197,24 @@ function ExternalDiarization({ chapter, onChanged }: {
       )}
     </section>
   )
+}
+
+/** Download the finished labeled chapter (speaker + emotion + text per line)
+ *  as a readable script. Reuses GET /chapters/{id}/lines — no backend change. */
+async function downloadDiarization(chapter: Chapter) {
+  const { lines } = await getLines(chapter.id)
+  const header = `Ch. ${chapter.chapter_index + 1} — ${chapter.title}\n` +
+                 `${lines.length} lines\n\n`
+  const body = lines.map((l, idx) =>
+    `[${String(idx + 1).padStart(4, '0')}] ${l.speaker} (${l.emotion}): ${l.text}`
+  ).join('\n')
+  const blob = new Blob([header + body], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `ch_${String(chapter.id).padStart(4, '0')}.diarization.txt`
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 function ChapterDetail({ chapter, onPlay, onChanged }: {
@@ -244,6 +272,13 @@ function ChapterDetail({ chapter, onPlay, onChanged }: {
           {complete && chapter.output_audio_path != null && (
             <button className="btn flex-1" onClick={() => onPlay(chapter.id)}>▶ Play</button>
           )}
+          {hasDiarization && (
+            <button
+              className="btn flex-1"
+              onClick={() => downloadDiarization(chapter)}
+              title="Download the labeled chapter (speaker + emotion per line)"
+            >↓ Diarization</button>
+          )}
           <ConfirmButton
             className="btn flex-1"
             confirmClassName="btn flex-1"
@@ -264,9 +299,7 @@ function ChapterDetail({ chapter, onPlay, onChanged }: {
           )}
         </div>
 
-        {(chapter.status === 'pending' || chapter.status === 'diarized') && (
-          <ExternalDiarization chapter={chapter} onChanged={onChanged} />
-        )}
+        <ExternalDiarization chapter={chapter} onChanged={onChanged} />
       </div>
 
       {hasDiarization && lines.length > 0 && (
