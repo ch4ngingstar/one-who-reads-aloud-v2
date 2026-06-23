@@ -4,7 +4,8 @@ import ConfirmButton from '@/components/ConfirmButton'
 import VoiceMapper from '@/components/VoiceMapper'
 import LiveLog from '@/components/LiveLog'
 import {
-  chapterSegmentsUrl, deleteChapterAudio, getLines, importChapterLabels, resetChapter,
+  chapterSegmentsUrl, deleteChapterAudio, diarizeChapterCloud, getLines,
+  importChapterLabels, resetChapter,
 } from '@/lib/api'
 import { formatMB, parseChapterError } from '@/lib/format'
 import type { Chapter, Line, SSEEvent, Voice } from '@/lib/types'
@@ -119,13 +120,42 @@ interface LabelResult { name: string; ok: boolean; message: string }
 
 /** Export a chapter's segments and import externally-formatted labels.
  *  Lets the user diarize anywhere (cloud LLM / hand) instead of the local LLM. */
+const API_KEY_STORAGE = 'anthropic_api_key'
+
 function ExternalDiarization({ chapter, onChanged }: {
   chapter: Chapter; onChanged: () => void
 }) {
   const [results, setResults] = useState<LabelResult[]>([])
   const [busy, setBusy] = useState(false)
   const [force, setForce] = useState(false)
+  const [apiKey, setApiKey] = useState('')
   const padded = String(chapter.id).padStart(4, '0')
+
+  useEffect(() => {
+    setApiKey(localStorage.getItem(API_KEY_STORAGE) ?? '')
+  }, [])
+
+  function updateApiKey(value: string) {
+    setApiKey(value)
+    localStorage.setItem(API_KEY_STORAGE, value)
+  }
+
+  async function handleDiarizeCloud() {
+    if (!apiKey.trim() || busy) return
+    setBusy(true)
+    setResults([])
+    try {
+      const data = await diarizeChapterCloud(chapter.id, { apiKey: apiKey.trim(), force })
+      setResults([{ name: `ch_${padded}`, ok: true, message: `diarized (${data.lines} lines)` }])
+      onChanged()
+    } catch (err) {
+      setResults([{
+        name: `ch_${padded}`, ok: false,
+        message: err instanceof Error ? err.message : String(err),
+      }])
+    }
+    setBusy(false)
+  }
 
   async function handleUpload(files: FileList | null) {
     if (!files || files.length === 0) return
@@ -183,6 +213,31 @@ function ExternalDiarization({ chapter, onChanged }: {
         />
         force overwrite (re-import past diarized — clears existing audio)
       </label>
+
+      <div className="mt-3 pt-3 border-t border-[#141414]">
+        <div className="text-[9px] tracking-[2px] uppercase text-spell-g4 mb-2">
+          Diarize with Claude (no local LLM)
+        </div>
+        <input
+          type="password"
+          className="input w-full text-[11px]"
+          placeholder="Anthropic API key (sk-ant-…)"
+          value={apiKey}
+          disabled={busy}
+          onChange={e => updateApiKey(e.target.value)}
+        />
+        <button
+          className="btn w-full mt-2 text-center"
+          disabled={busy || !apiKey.trim()}
+          onClick={handleDiarizeCloud}
+        >
+          {busy ? 'Diarizing…' : '✨ Diarize with Claude'}
+        </button>
+        <p className="mt-1.5 text-[9px] leading-snug text-spell-g5">
+          Key is stored in this browser only and sent per request — never saved on the server.
+        </p>
+      </div>
+
       {results.length > 0 && (
         <div className="mt-2.5 space-y-1">
           {results.map(r => (

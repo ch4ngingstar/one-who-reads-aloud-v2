@@ -486,6 +486,73 @@ def test_post_chapter_labels_stale_rejected():
     print("  PASS test_post_chapter_labels_stale_rejected")
 
 
+def _patch_cloud_formatter(monkey_return=None):
+    """Patch api.dio.format_labels_via_claude; returns a restore() callable.
+
+    `monkey_return` is a fn(export_payload) -> labels dict. The fake never hits
+    the network or the `anthropic` package."""
+    import api
+    original = api.dio.format_labels_via_claude
+
+    def fake(export_payload, *, api_key, model="claude-opus-4-8", **kw):
+        return monkey_return(export_payload)
+
+    api.dio.format_labels_via_claude = fake
+    return lambda: setattr(api.dio, "format_labels_via_claude", original)
+
+
+def _narrator_labels(export_payload):
+    return {"labels": [{"i": s["i"], "speaker": "Narrator", "emotion": "neutral"}
+                       for s in export_payload["segments"]]}
+
+
+def test_post_diarize_cloud_imports():
+    client, sm, _ = _make_client()
+    ch_id = _seed_one_chapter(sm, "The hall was silent.")
+    restore = _patch_cloud_formatter(_narrator_labels)
+    try:
+        r = client.post(f"/api/chapters/{ch_id}/diarize-cloud",
+                        json={"api_key": "sk-ant-test"})
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "diarized"
+        assert sm.get_chapter_by_id(ch_id)["status"] == "diarized"
+    finally:
+        restore()
+    print("  PASS test_post_diarize_cloud_imports")
+
+
+def test_post_diarize_cloud_missing_key():
+    import os
+    client, sm, _ = _make_client()
+    ch_id = _seed_one_chapter(sm, "The hall was silent.")
+    saved = os.environ.pop("ANTHROPIC_API_KEY", None)  # ensure no env fallback
+    try:
+        r = client.post(f"/api/chapters/{ch_id}/diarize-cloud", json={})
+        assert r.status_code == 400, r.text
+        assert "key" in r.json()["detail"].lower()
+    finally:
+        if saved is not None:
+            os.environ["ANTHROPIC_API_KEY"] = saved
+    print("  PASS test_post_diarize_cloud_missing_key")
+
+
+def test_post_diarize_cloud_force_conflict():
+    client, sm, _ = _make_client()
+    ch_id = _seed_one_chapter(sm, "The hall was silent.")
+    restore = _patch_cloud_formatter(_narrator_labels)
+    try:
+        client.post(f"/api/chapters/{ch_id}/diarize-cloud", json={"api_key": "sk-ant-test"})
+        sm.mark_chapter_status(ch_id, "complete")
+        r = client.post(f"/api/chapters/{ch_id}/diarize-cloud", json={"api_key": "sk-ant-test"})
+        assert r.status_code == 409, r.text
+        r2 = client.post(f"/api/chapters/{ch_id}/diarize-cloud",
+                         json={"api_key": "sk-ant-test", "force": True})
+        assert r2.status_code == 200, r2.text
+    finally:
+        restore()
+    print("  PASS test_post_diarize_cloud_force_conflict")
+
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
 def _cleanup():
@@ -525,6 +592,9 @@ TESTS = [
     test_post_chapter_labels_imports,
     test_post_chapter_labels_conflict_past_diarized,
     test_post_chapter_labels_stale_rejected,
+    test_post_diarize_cloud_imports,
+    test_post_diarize_cloud_missing_key,
+    test_post_diarize_cloud_force_conflict,
 ]
 
 if __name__ == "__main__":

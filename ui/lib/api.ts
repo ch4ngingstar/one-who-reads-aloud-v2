@@ -150,6 +150,23 @@ export async function importChapterLabels(
   })
 }
 
+/** One-click cloud diarization: server exports segments, calls Claude, and
+ *  imports the labels → status 'diarized'. `apiKey` is sent per request and
+ *  never persisted server-side. */
+export async function diarizeChapterCloud(
+  chapterId: number,
+  params: { apiKey: string; model?: string; force?: boolean },
+): Promise<{ chapter_id: number; lines: number; status: string }> {
+  return req(`/chapters/${chapterId}/diarize-cloud`, {
+    method: 'POST',
+    body: JSON.stringify({
+      api_key: params.apiKey,
+      model: params.model,
+      force: params.force ?? false,
+    }),
+  })
+}
+
 export async function resetChapters(params: {
   project_id: number
   status_filter?: string[] | null

@@ -29,6 +29,7 @@ DATA FLOW into Module 8 (Next.js):
 
 import asyncio
 import json
+import os
 import re
 import sqlite3
 import threading
@@ -98,6 +99,12 @@ class LabelEntry(BaseModel):
 class LabelsImport(BaseModel):
     chapter_id: Optional[int] = None   # echoed by exporter; path param is authoritative
     labels:     list[LabelEntry]
+
+
+class CloudDiarizeRequest(BaseModel):
+    model:   str = "claude-opus-4-8"
+    force:   bool = False
+    api_key: Optional[str] = None   # browser-supplied; falls back to server env var
 
 
 # ── Pipeline manager ──────────────────────────────────────────────────────────
@@ -522,6 +529,37 @@ async def post_chapter_labels(
             "labels": [e.model_dump() for e in payload.labels]}
     try:
         n = dio.import_labels(sm, chapter_id, body, force=force)
+    except dio.ImportRejected as e:
+        msg = str(e)
+        if "past diarized" in msg:
+            raise HTTPException(status_code=409, detail=msg)
+        if "no chapter" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+    return {"chapter_id": chapter_id, "lines": n, "status": "diarized"}
+
+
+@app.post("/api/chapters/{chapter_id}/diarize-cloud")
+async def post_chapter_diarize_cloud(
+    chapter_id: int,
+    payload: CloudDiarizeRequest,
+    sm: StateManager = Depends(get_sm),
+):
+    """One-shot cloud diarization: export segments -> Claude -> import labels.
+
+    The API key comes from the request (browser-stored) or, as a fallback, the
+    server's ANTHROPIC_API_KEY env var. The key is used only for this call and
+    never persisted server-side."""
+    api_key = (payload.api_key or "").strip() or os.environ.get("ANTHROPIC_API_KEY", "")
+    try:
+        export_payload = dio.build_export(sm, chapter_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    try:
+        labels = dio.format_labels_via_claude(
+            export_payload, api_key=api_key, model=payload.model)
+        n = dio.import_labels(sm, chapter_id, labels, force=payload.force)
     except dio.ImportRejected as e:
         msg = str(e)
         if "past diarized" in msg:

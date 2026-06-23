@@ -22,6 +22,14 @@ The output contract is enforced on import (`enforce_labels`, shared with the loc
 Anything outside those sets is repaired (bad speaker→`Unknown`, bad emotion→`neutral`), so
 staying inside them is what makes a clean import.
 
+## Easiest path: one button in the UI
+
+Open a chapter's Inspector → **External diarization** → paste your Anthropic API
+key once (stored in the browser only, never on the server) → click **✨ Diarize
+with Claude**. That runs the whole round-trip server-side (export → Claude →
+import) and flips the chapter to `diarized`. No files, no terminal. The manual
+export/label/import steps below are still there for whole volumes or hand-labelling.
+
 ## End-to-end for any volume
 
 1. **Parse the EPUB into the project first** (`POST /api/project`) so the volume's chapters

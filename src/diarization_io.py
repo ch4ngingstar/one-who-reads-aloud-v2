@@ -8,6 +8,8 @@ from the stored EPUB chunks via segment_chunk(). GPU-free, no llama_cpp import.
 """
 from __future__ import annotations
 
+import json
+
 from segmenter import segment_chunk
 from llm_director import (
     enforce_labels, _allowed_speakers, _build_system_prompt,
@@ -78,6 +80,66 @@ _OVERWRITABLE = {"pending", "diarized", "error"}
 
 class ImportRejected(Exception):
     """Raised when an external label file is invalid or unsafe to apply."""
+
+
+def _segments_to_user_msg(segments: "list[dict]") -> str:
+    """Render export segments as the `i [KIND] text` lines the prompt expects."""
+    return "\n".join(
+        f"{s['i']} [{s['kind'][0].upper()}] {s['text']}" for s in segments
+    )
+
+
+def format_labels_via_claude(export_payload: dict, *, api_key: str,
+                             model: str = "claude-opus-4-8",
+                             max_tokens: int = 8192,
+                             speakers: "list[str] | None" = None) -> dict:
+    """Send one chapter's exported segments to Claude, return a labels dict.
+
+    Returns ``{"labels": [{"i", "speaker", "emotion"}, ...]}`` ready for
+    ``import_labels``. GPU-free, no network unless called. The model never sees
+    or returns chapter text beyond the segments it is labelling; on import the
+    text is re-derived from the EPUB regardless.
+
+    Raises ImportRejected (so the API layer maps it to a 4xx) when the key is
+    missing, the ``anthropic`` package is unavailable, or the model output can
+    not be parsed as the labels JSON object.
+    """
+    if not api_key or not api_key.strip():
+        raise ImportRejected("no Anthropic API key provided")
+
+    try:
+        import anthropic
+    except ImportError:
+        raise ImportRejected(
+            "the 'anthropic' package is not installed on the server "
+            "(`pip install anthropic`)")
+
+    segments = export_payload.get("segments", [])
+    if not segments:
+        raise ImportRejected("export payload has no segments to label")
+
+    client = anthropic.Anthropic(api_key=api_key.strip())
+    try:
+        resp = client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=build_system_prompt_text(speakers),
+            messages=[{"role": "user", "content": _segments_to_user_msg(segments)}],
+        )
+    except Exception as e:  # anthropic.APIError, auth, network -- surface cleanly
+        raise ImportRejected(f"Claude request failed: {e}")
+
+    text = resp.content[0].text if resp.content else ""
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise ImportRejected("Claude did not return a JSON labels object")
+    try:
+        labels = json.loads(text[start:end + 1])
+    except json.JSONDecodeError as e:
+        raise ImportRejected(f"could not parse Claude labels JSON: {e}")
+    if not isinstance(labels, dict) or "labels" not in labels:
+        raise ImportRejected("Claude output missing 'labels' array")
+    return labels
 
 
 def validate_labels(payload: dict, segments: "list[dict]") -> "dict[int, tuple[str, str]]":

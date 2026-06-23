@@ -89,15 +89,12 @@ def cmd_import(args):
 
 def cmd_format_cloud(args):
     """Optional: call Anthropic to produce labels from exported segments."""
-    try:
-        import anthropic
-    except ImportError:
-        sys.exit("error: `pip install anthropic` and set ANTHROPIC_API_KEY to use format-cloud")
     import os
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        sys.exit("error: set ANTHROPIC_API_KEY to use format-cloud")
 
     src = Path(args.in_dir)
-    system_prompt = (src / "system_prompt.txt").read_text(encoding="utf-8")
     done = 0
     for seg_file in sorted(src.glob("ch_*.segments.json")):
         chapter_id = int(seg_file.name[len("ch_"):].split(".")[0])
@@ -105,16 +102,11 @@ def cmd_format_cloud(args):
         if out_file.exists() and not args.force:
             continue
         payload = json.loads(seg_file.read_text(encoding="utf-8"))
-        user_msg = "\n".join(
-            f"{s['i']} [{s['kind'][0].upper()}] {s['text']}" for s in payload["segments"])
-        resp = client.messages.create(
-            model=args.model, max_tokens=8192,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_msg}],
-        )
-        text = resp.content[0].text
-        start, end = text.find("{"), text.rfind("}")
-        labels = json.loads(text[start:end + 1])
+        try:
+            labels = dio.format_labels_via_claude(
+                payload, api_key=api_key, model=args.model)
+        except dio.ImportRejected as e:
+            sys.exit(f"error: {e}")
         labels["chapter_id"] = chapter_id
         out_file.write_text(json.dumps(labels, ensure_ascii=False, indent=2),
                             encoding="utf-8")
