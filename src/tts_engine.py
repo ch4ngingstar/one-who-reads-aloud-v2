@@ -210,8 +210,8 @@ SPEAKER_ALIASES: dict[str, str] = {
     "Bloodwave":          "Saint Bloodwave",
     "Detective Sunless":  "Sunny",         # Sunny's undercover identity (vol10 Mirage arc)
     "Sir Sunless":        "Sunny",
-    "Princess Moonveil":  "Moonveil",      # no clip yet -> falls back until registered
-    "Warden Of Valor":    "Warden",        # no clip yet -> falls back until registered
+    "Princess Moonveil":  "Moonveil",      # epithet -> registered Moonveil clip
+    "Warden Of Valor":    "Warden",        # epithet -> registered Warden clip
 
     # Corrupted / monster entities
     "Abomination":        "The Nightmare Abomination",
