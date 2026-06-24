@@ -68,4 +68,23 @@ describe('InspectorPanel', () => {
     render(<InspectorPanel {...base} tab="forge" />)
     expect(screen.getByTestId('forge-content')).toBeInTheDocument()
   })
+
+  it('prompts to pick a chapter on the diarize tab when none is selected', () => {
+    render(<InspectorPanel {...base} tab="diarize" selectedChapter={null} />)
+    expect(screen.getByText(/select a chapter to diarize/i)).toBeInTheDocument()
+  })
+
+  it('shows the cloud diarization action on the diarize tab for a selected chapter', () => {
+    render(<InspectorPanel {...base} tab="diarize" selectedChapter={makeChapter()} />)
+    expect(screen.getByText(/cloud diarization/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /diarize this chapter/i })).toBeInTheDocument()
+    expect(screen.getByRole('combobox')).toBeInTheDocument()
+  })
+
+  it('offers Claude, OpenAI and Gemini as diarization providers', () => {
+    render(<InspectorPanel {...base} tab="diarize" selectedChapter={makeChapter()} />)
+    const select = screen.getByRole('combobox') as HTMLSelectElement
+    const values = Array.from(select.options).map(o => o.value)
+    expect(values).toEqual(['claude', 'openai', 'gemini'])
+  })
 })

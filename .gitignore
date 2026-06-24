@@ -42,6 +42,10 @@ logs/
 .ruff_cache/
 *.log
 .superpowers/
+# Local eval/measurement outputs (the eval harness itself was removed for a
+# clean end-user repo; these are scratch result files, kept on disk only)
+docs/eval_*.csv
+docs/eval_*.json
 
 # ─── Screenshots & scratch images (root-level captures) ───
 *.png
