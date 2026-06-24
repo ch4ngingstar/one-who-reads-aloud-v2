@@ -291,6 +291,66 @@ def test_format_cloud_bad_json_rejected():
     print("  PASS test_format_cloud_bad_json_rejected")
 
 
+def _install_fake_openai(reply_text, capture=None):
+    """Put a fake `openai` module in sys.modules (OpenAI().chat.completions.create)."""
+    import types
+    mod = types.ModuleType("openai")
+
+    class _Msg:
+        def __init__(self, content): self.message = types.SimpleNamespace(content=content)
+
+    class _Resp:
+        def __init__(self, text): self.choices = [_Msg(text)]
+
+    class _Completions:
+        def create(self, **kwargs):
+            if capture is not None:
+                capture.update(kwargs)
+            return _Resp(reply_text)
+
+    class _OpenAI:
+        def __init__(self, api_key=None):
+            self.chat = types.SimpleNamespace(completions = _Completions())
+
+    mod.OpenAI = _OpenAI
+    sys.modules["openai"] = mod
+
+
+def test_format_cloud_openai_provider():
+    sm = _tmp_sm()
+    ch_id, payload = _payload_one_chapter(sm)
+    n = len(payload["segments"])
+    labels = {"labels": [{"i": i, "speaker": "Narrator", "emotion": "neutral"}
+                         for i in range(n)]}
+    cap = {}
+    _install_fake_openai(json.dumps(labels), capture=cap)
+    try:
+        out = dio.format_labels_via_cloud(payload, provider="openai",
+                                          api_key="sk-x", model="gpt-4o")
+        assert out["labels"] == labels["labels"]
+        assert cap["model"] == "gpt-4o"
+        # system + user roles both sent to the chat-completions API
+        roles = [m["role"] for m in cap["messages"]]
+        assert roles == ["system", "user"]
+        assert all(f"{s['i']} [" in cap["messages"][1]["content"] for s in payload["segments"])
+        dio.import_labels(sm, ch_id, out)
+        assert sm.get_chapter_by_id(ch_id)["status"] == "diarized"
+    finally:
+        sys.modules.pop("openai", None)
+    print("  PASS test_format_cloud_openai_provider")
+
+
+def test_format_cloud_unknown_provider_rejected():
+    sm = _tmp_sm()
+    _, payload = _payload_one_chapter(sm)
+    try:
+        dio.format_labels_via_cloud(payload, provider="llama", api_key="x")
+        assert False, "expected rejection on unknown provider"
+    except dio.ImportRejected as e:
+        assert "provider" in str(e).lower()
+    print("  PASS test_format_cloud_unknown_provider_rejected")
+
+
 TESTS = [
     test_segment_chapter_global_indices,
     test_build_export_payload,
@@ -305,6 +365,8 @@ TESTS = [
     test_format_cloud_empty_key_rejected,
     test_format_cloud_parses_labels_and_sends_prompt,
     test_format_cloud_bad_json_rejected,
+    test_format_cloud_openai_provider,
+    test_format_cloud_unknown_provider_rejected,
 ]
 
 

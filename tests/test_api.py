@@ -52,6 +52,14 @@ def _make_tiny_wav(path: Path) -> Path:
     return path
 
 
+def _make_valid_wav(path: Path) -> Path:
+    """Create a WAV large enough to pass the 10 KB upload guard (~22 KB, 0.5 s)."""
+    with wave.open(str(path), "wb") as wf:
+        wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(22050)
+        wf.writeframes(b"\x00\x00" * 11025)
+    return path
+
+
 def _make_client(sm=None, mgr=None):
     """Create a TestClient with injected dependencies."""
     _sm  = sm  or _tmp_sm()
@@ -202,7 +210,7 @@ def test_upload_voice():
     client, _, _ = _make_client(sm=sm)
 
     with tempfile.TemporaryDirectory() as tmp:
-        wav_path = _make_tiny_wav(Path(tmp) / "test.wav")
+        wav_path = _make_valid_wav(Path(tmp) / "test.wav")
 
         with open(wav_path, "rb") as f:
             r = client.post(
@@ -486,19 +494,22 @@ def test_post_chapter_labels_stale_rejected():
     print("  PASS test_post_chapter_labels_stale_rejected")
 
 
-def _patch_cloud_formatter(monkey_return=None):
-    """Patch api.dio.format_labels_via_claude; returns a restore() callable.
+def _patch_cloud_formatter(monkey_return=None, capture=None):
+    """Patch api.dio.format_labels_via_cloud; returns a restore() callable.
 
-    `monkey_return` is a fn(export_payload) -> labels dict. The fake never hits
-    the network or the `anthropic` package."""
+    `monkey_return` is a fn(export_payload) -> labels dict. `capture` (optional
+    dict) records the provider/model/api_key kwargs. The fake never hits the
+    network or any provider SDK."""
     import api
-    original = api.dio.format_labels_via_claude
+    original = api.dio.format_labels_via_cloud
 
-    def fake(export_payload, *, api_key, model="claude-opus-4-8", **kw):
+    def fake(export_payload, *, provider="claude", api_key, model=None, **kw):
+        if capture is not None:
+            capture.update(provider=provider, api_key=api_key, model=model)
         return monkey_return(export_payload)
 
-    api.dio.format_labels_via_claude = fake
-    return lambda: setattr(api.dio, "format_labels_via_claude", original)
+    api.dio.format_labels_via_cloud = fake
+    return lambda: setattr(api.dio, "format_labels_via_cloud", original)
 
 
 def _narrator_labels(export_payload):
@@ -553,6 +564,24 @@ def test_post_diarize_cloud_force_conflict():
     print("  PASS test_post_diarize_cloud_force_conflict")
 
 
+def test_post_diarize_cloud_routes_provider_and_model():
+    client, sm, _ = _make_client()
+    ch_id = _seed_one_chapter(sm, "The hall was silent.")
+    cap = {}
+    restore = _patch_cloud_formatter(_narrator_labels, capture=cap)
+    try:
+        r = client.post(f"/api/chapters/{ch_id}/diarize-cloud",
+                        json={"provider": "gemini", "model": "gemini-1.5-pro",
+                              "api_key": "AIza-test"})
+        assert r.status_code == 200, r.text
+        assert cap["provider"] == "gemini"
+        assert cap["model"] == "gemini-1.5-pro"
+        assert cap["api_key"] == "AIza-test"
+    finally:
+        restore()
+    print("  PASS test_post_diarize_cloud_routes_provider_and_model")
+
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
 def _cleanup():
@@ -595,6 +624,7 @@ TESTS = [
     test_post_diarize_cloud_imports,
     test_post_diarize_cloud_missing_key,
     test_post_diarize_cloud_force_conflict,
+    test_post_diarize_cloud_routes_provider_and_model,
 ]
 
 if __name__ == "__main__":

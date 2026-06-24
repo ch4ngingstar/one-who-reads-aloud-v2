@@ -32,6 +32,8 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
+import tempfile
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -102,9 +104,10 @@ class LabelsImport(BaseModel):
 
 
 class CloudDiarizeRequest(BaseModel):
-    model:   str = "claude-opus-4-8"
-    force:   bool = False
-    api_key: Optional[str] = None   # browser-supplied; falls back to server env var
+    provider: str = "claude"            # claude | openai | gemini
+    model:    Optional[str] = None      # overrides the provider default
+    force:    bool = False
+    api_key:  Optional[str] = None      # browser-supplied; falls back to server env var
 
 
 # ── Pipeline manager ──────────────────────────────────────────────────────────
@@ -240,6 +243,42 @@ def _resolve_data_path(p: "str | Path") -> Path:
         return root_candidate
     src_candidate = _SRC_DIR / path
     return src_candidate if src_candidate.exists() else root_candidate
+
+def _normalize_voice_clip(raw_bytes: bytes, dest: Path) -> bool:
+    """
+    Normalize a voice reference clip to -16 LUFS / -1.5 dBTP and save as
+    16-bit PCM mono WAV.  This equalises loudness across all speaker clips so
+    IndexTTS2 clones voices at a consistent level.
+
+    Returns True on success.  Callers should fall back to saving raw_bytes if
+    this returns False (ffmpeg unavailable / non-fatal encoding error).
+    """
+    with tempfile.NamedTemporaryFile(suffix=".tmp", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+        tmp_path.write_bytes(raw_bytes)
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", str(tmp_path),
+                "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+                "-ar", "22050",   # standard rate for TTS reference clips
+                "-c:a", "pcm_s16le",
+                "-ac", "1",       # force mono — IndexTTS2 expects mono reference
+                str(dest),
+            ],
+            capture_output=True,
+            timeout=60,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+    finally:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -539,26 +578,36 @@ async def post_chapter_labels(
     return {"chapter_id": chapter_id, "lines": n, "status": "diarized"}
 
 
+_PROVIDER_ENV = {
+    "claude": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+}
+
+
 @app.post("/api/chapters/{chapter_id}/diarize-cloud")
 async def post_chapter_diarize_cloud(
     chapter_id: int,
     payload: CloudDiarizeRequest,
     sm: StateManager = Depends(get_sm),
 ):
-    """One-shot cloud diarization: export segments -> Claude -> import labels.
+    """One-shot cloud diarization: export segments -> cloud LLM -> import labels.
 
-    The API key comes from the request (browser-stored) or, as a fallback, the
-    server's ANTHROPIC_API_KEY env var. The key is used only for this call and
-    never persisted server-side."""
-    api_key = (payload.api_key or "").strip() or os.environ.get("ANTHROPIC_API_KEY", "")
+    Provider is claude | openai | gemini. The API key comes from the request
+    (browser-stored) or, as a fallback, the matching server env var
+    (ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY). The key is used only
+    for this call and never persisted server-side."""
+    provider = (payload.provider or "claude").strip().lower()
+    env_var = _PROVIDER_ENV.get(provider, "ANTHROPIC_API_KEY")
+    api_key = (payload.api_key or "").strip() or os.environ.get(env_var, "")
     try:
         export_payload = dio.build_export(sm, chapter_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
     try:
-        labels = dio.format_labels_via_claude(
-            export_payload, api_key=api_key, model=payload.model)
+        labels = dio.format_labels_via_cloud(
+            export_payload, provider=provider, api_key=api_key, model=payload.model)
         n = dio.import_labels(sm, chapter_id, labels, force=payload.force)
     except dio.ImportRejected as e:
         msg = str(e)
@@ -669,9 +718,26 @@ async def upload_voice(
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
+    # A valid 3-second voice clip at 22050 Hz 16-bit mono is ~132 KB.
+    # Anything under 10 KB is a header or silence with no usable audio.
+    if len(content) < 10_000:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Voice clip is too short ({len(content):,} bytes). "
+                   "Upload at least 3-10 seconds of clean speech.",
+        )
+
     _VOICES_DIR.mkdir(parents=True, exist_ok=True)
-    dest = _VOICES_DIR / f"{slug}{ext}"
-    dest.write_bytes(content)
+
+    # Always normalize and save as WAV — loudnorm to -16 LUFS so all speakers
+    # are synthesized at a consistent volume level.
+    dest = _VOICES_DIR / f"{slug}.wav"
+    normalized = _normalize_voice_clip(content, dest)
+    if not normalized:
+        # FFmpeg unavailable or failed — save the raw file and carry on.
+        dest = _VOICES_DIR / f"{slug}{ext}"
+        dest.write_bytes(content)
+
     sm.set_voice(speaker, str(dest))
     return {"speaker": speaker, "ref_audio_path": str(dest)}
 

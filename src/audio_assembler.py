@@ -47,6 +47,10 @@ _DEFAULT_CFG = {
     "output_sample_rate":       44100,
     "output_channels":          1,     # mono — smaller files, standard for audiobooks
     "min_completion_ratio":     0.5,   # abort if fewer than 50% of lines are tts_done
+    # EBU R128 / ACX loudness normalisation applied to the final assembled chapter.
+    # -20 LUFS is the Audible ACX standard for audiobooks.
+    "loudnorm":              True,
+    "loudnorm_target_lufs":  -20,
 }
 
 
@@ -218,11 +222,16 @@ class AudioAssembler:
     # ── FFmpeg ────────────────────────────────────────────────────────────────
 
     def _build_ffmpeg_cmd(self, list_path: Path, output_path: Path) -> list[str]:
-        """Build the FFmpeg concat + encode command (no loudnorm — preserves voice quality)."""
+        """Build the FFmpeg concat + encode command with optional EBU R128 loudnorm."""
         cmd = [
             "ffmpeg", "-y",
             "-f", "concat", "-safe", "0",
             "-i", str(list_path),
+        ]
+        if self.cfg.get("loudnorm"):
+            lufs = self.cfg.get("loudnorm_target_lufs", -20)
+            cmd += ["-af", f"loudnorm=I={lufs}:TP=-1.5:LRA=11"]
+        cmd += [
             "-ar", str(self.cfg["output_sample_rate"]),
             "-ac", str(self.cfg["output_channels"]),
         ]
