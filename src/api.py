@@ -246,9 +246,15 @@ def _resolve_data_path(p: "str | Path") -> Path:
 
 def _normalize_voice_clip(raw_bytes: bytes, dest: Path) -> bool:
     """
-    Normalize a voice reference clip to -16 LUFS / -1.5 dBTP and save as
-    16-bit PCM mono WAV.  This equalises loudness across all speaker clips so
-    IndexTTS2 clones voices at a consistent level.
+    Transcode a voice reference clip to 16-bit PCM mono WAV, preserving the
+    source sample rate and dynamics.
+
+    We deliberately do NOT apply loudness normalisation or downsampling here:
+    single-pass ffmpeg ``loudnorm`` dynamically compresses the audio (audible
+    pumping) and resampling to 22 kHz discards the top octave — both degrade the
+    timbre IndexTTS2 clones from. The model resamples the reference internally,
+    so the cleanest, highest-fidelity clip yields the best clone. We only force
+    mono (IndexTTS2 expects a mono reference) and a consistent WAV container.
 
     Returns True on success.  Callers should fall back to saving raw_bytes if
     this returns False (ffmpeg unavailable / non-fatal encoding error).
@@ -261,8 +267,6 @@ def _normalize_voice_clip(raw_bytes: bytes, dest: Path) -> bool:
             [
                 "ffmpeg", "-y",
                 "-i", str(tmp_path),
-                "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
-                "-ar", "22050",   # standard rate for TTS reference clips
                 "-c:a", "pcm_s16le",
                 "-ac", "1",       # force mono — IndexTTS2 expects mono reference
                 str(dest),
@@ -729,8 +733,8 @@ async def upload_voice(
 
     _VOICES_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Always normalize and save as WAV — loudnorm to -16 LUFS so all speakers
-    # are synthesized at a consistent volume level.
+    # Transcode to mono 16-bit WAV (preserving sample rate + dynamics) so every
+    # clip is a clean, consistent container for IndexTTS2 to clone from.
     dest = _VOICES_DIR / f"{slug}.wav"
     normalized = _normalize_voice_clip(content, dest)
     if not normalized:
