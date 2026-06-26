@@ -105,6 +105,34 @@ CREATE TABLE IF NOT EXISTS voices (
     created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
     updated_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
+
+-- Sound-design library: tagged ambience / sfx / music clips (mirrors voices).
+CREATE TABLE IF NOT EXISTS sfx_assets (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    tag           TEXT    NOT NULL UNIQUE,
+    category      TEXT    NOT NULL,            -- 'ambience' | 'sfx' | 'music'
+    audio_path    TEXT    NOT NULL,
+    display_name  TEXT,
+    loopable      INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    updated_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+-- Per-chapter sound-design cues (scene ambience ranges / discrete sfx / music).
+CREATE TABLE IF NOT EXISTS chapter_cues (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    chapter_id    INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+    cue_type      TEXT    NOT NULL,            -- 'scene' | 'sfx' | 'music'
+    tag           TEXT    NOT NULL,
+    line_start    INTEGER NOT NULL,
+    line_end      INTEGER,                     -- scenes only
+    at_anchor     TEXT,                        -- sfx only: 'start' | 'end'
+    gain_db       REAL    NOT NULL DEFAULT -20,
+    duration_s    REAL,                        -- music only
+    source        TEXT    NOT NULL DEFAULT 'cloud',
+    created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_chapter_cues_chapter ON chapter_cues(chapter_id);
 """
 
 
@@ -163,6 +191,9 @@ class StateManager:
                 "ALTER TABLE chapters ADD COLUMN processing_seconds REAL",
                 # ref_text was only needed by Fish Speech; IndexTTS2 ignores it.
                 "ALTER TABLE voices DROP COLUMN ref_text",
+                # Sound design: 1 once the user has hand-edited a chapter's cues,
+                # which then guards against an auto-import clobbering manual edits.
+                "ALTER TABLE chapters ADD COLUMN cues_reviewed INTEGER NOT NULL DEFAULT 0",
             ]:
                 try:
                     conn.execute(sql)
@@ -507,6 +538,123 @@ class StateManager:
                 "FROM voices ORDER BY speaker"
             ).fetchall()
             return [dict(r) for r in rows]
+
+    # ── Sound-design library (sfx_assets) ─────────────────────────────────────
+
+    def set_sfx_asset(
+        self,
+        tag: str,
+        category: str,
+        audio_path: str,
+        display_name: "str | None" = None,
+        loopable: bool = True,
+    ) -> None:
+        """Upsert a tag -> sound clip mapping (mirrors set_voice)."""
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT INTO sfx_assets
+                     (tag, category, audio_path, display_name, loopable, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(tag) DO UPDATE SET
+                     category=excluded.category,
+                     audio_path=excluded.audio_path,
+                     display_name=excluded.display_name,
+                     loopable=excluded.loopable,
+                     updated_at=excluded.updated_at""",
+                (tag, category, audio_path, display_name,
+                 1 if loopable else 0, _now()),
+            )
+
+    def delete_sfx_asset(self, tag: str) -> bool:
+        """Remove a sound asset. Returns True if found and deleted."""
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM sfx_assets WHERE tag = ?", (tag,))
+            return cur.rowcount > 0
+
+    def get_sfx_map(self) -> dict:
+        """Returns { tag: {"path": str, "category": str, "loopable": bool} }.
+
+        Read by the SoundDesigner at render time to resolve cue tags to clips.
+        """
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT tag, category, audio_path, loopable FROM sfx_assets"
+            ).fetchall()
+            return {
+                r["tag"]: {
+                    "path": r["audio_path"],
+                    "category": r["category"],
+                    "loopable": bool(r["loopable"]),
+                }
+                for r in rows
+            }
+
+    def get_all_sfx(self) -> list:
+        """Returns full sfx rows for the UI, grouped by category then tag."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, tag, category, audio_path, display_name, loopable, "
+                "created_at, updated_at FROM sfx_assets ORDER BY category, tag"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    # ── Per-chapter sound-design cues (chapter_cues) ──────────────────────────
+
+    def replace_chapter_cues(self, chapter_id: int, cues: list) -> int:
+        """Atomically replace all cues for a chapter. Returns rows written.
+
+        cues: [{ "cue_type": 'scene'|'sfx'|'music', "tag": str,
+                 "line_start": int, "line_end": int|None,
+                 "at_anchor": 'start'|'end'|None, "gain_db": float,
+                 "duration_s": float|None, "source": str }]
+        """
+        with self._conn() as conn:
+            conn.execute("DELETE FROM chapter_cues WHERE chapter_id = ?", (chapter_id,))
+            conn.executemany(
+                """INSERT INTO chapter_cues
+                     (chapter_id, cue_type, tag, line_start, line_end,
+                      at_anchor, gain_db, duration_s, source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (chapter_id, c["cue_type"], c["tag"], c["line_start"],
+                     c.get("line_end"), c.get("at_anchor"),
+                     c.get("gain_db", -20.0), c.get("duration_s"),
+                     c.get("source", "cloud"))
+                    for c in cues
+                ],
+            )
+        return len(cues)
+
+    def get_cues_for_chapter(self, chapter_id: int) -> list:
+        """All sound-design cues for a chapter, ordered by line then type.
+
+        Read by the AudioAssembler/SoundDesigner; also surfaced to the UI.
+        """
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT id, chapter_id, cue_type, tag, line_start, line_end,
+                          at_anchor, gain_db, duration_s, source, created_at
+                   FROM chapter_cues WHERE chapter_id = ?
+                   ORDER BY line_start, cue_type""",
+                (chapter_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def delete_chapter_cues(self, chapter_id: int) -> int:
+        """Delete all cues for a chapter. Returns rows deleted."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM chapter_cues WHERE chapter_id = ?", (chapter_id,)
+            )
+            return cur.rowcount
+
+    def mark_cues_reviewed(self, chapter_id: int, reviewed: bool = True) -> None:
+        """Flag a chapter's cues as user-edited (guards against auto-overwrite)."""
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE chapters SET cues_reviewed=?, updated_at=? WHERE id=?",
+                (1 if reviewed else 0, _now(), chapter_id),
+            )
 
     # ── Progress / stats ──────────────────────────────────────────────────────
 

@@ -269,6 +269,111 @@ def test_mark_chapter_status_stores_file_size():
     print("  PASS test_mark_chapter_status_stores_file_size")
 
 
+# ── Sound-design library (sfx_assets) ─────────────────────────────────────────
+
+def test_sfx_asset_upsert_and_map():
+    sm = _tmp_db()
+    sm.set_sfx_asset("cold_rain", "ambience", "/sfx/ambience/cold_rain.wav",
+                     display_name="Cold Rain", loopable=True)
+    sm.set_sfx_asset("sword_clash", "sfx", "/sfx/sfx/sword_clash.wav",
+                     loopable=False)
+
+    sfx_map = sm.get_sfx_map()
+    assert sfx_map["cold_rain"]["path"] == "/sfx/ambience/cold_rain.wav"
+    assert sfx_map["cold_rain"]["category"] == "ambience"
+    assert sfx_map["cold_rain"]["loopable"] is True
+    assert sfx_map["sword_clash"]["loopable"] is False
+
+    # upsert changes path + category, no duplicate row
+    sm.set_sfx_asset("cold_rain", "ambience", "/sfx/ambience/cold_rain_v2.wav")
+    assert sm.get_sfx_map()["cold_rain"]["path"] == "/sfx/ambience/cold_rain_v2.wav"
+    assert len(sm.get_all_sfx()) == 2
+    print("  PASS test_sfx_asset_upsert_and_map")
+
+
+def test_sfx_asset_delete():
+    sm = _tmp_db()
+    sm.set_sfx_asset("cold_rain", "ambience", "/sfx/cold_rain.wav")
+    assert sm.delete_sfx_asset("cold_rain") is True
+    assert "cold_rain" not in sm.get_sfx_map()
+    assert sm.delete_sfx_asset("cold_rain") is False
+    print("  PASS test_sfx_asset_delete")
+
+
+def test_get_all_sfx_ordered_by_category():
+    sm = _tmp_db()
+    sm.set_sfx_asset("tension_rise", "music", "/sfx/music/tension_rise.wav")
+    sm.set_sfx_asset("dungeon_drip", "ambience", "/sfx/ambience/dungeon_drip.wav")
+    sm.set_sfx_asset("door_creak", "sfx", "/sfx/sfx/door_creak.wav")
+
+    cats = [r["category"] for r in sm.get_all_sfx()]
+    assert cats == sorted(cats), f"rows must be grouped by category, got {cats}"
+    print("  PASS test_get_all_sfx_ordered_by_category")
+
+
+# ── Per-chapter cues (chapter_cues) ───────────────────────────────────────────
+
+def _seed_one_chapter(sm):
+    pid = sm.seed_project(_make_parsed_book(n_chapters=1))
+    return sm.get_all_chapters(pid)[0]["id"]
+
+
+def test_replace_chapter_cues_atomic():
+    sm = _tmp_db()
+    ch_id = _seed_one_chapter(sm)
+
+    n = sm.replace_chapter_cues(ch_id, [
+        {"cue_type": "scene", "tag": "cold_rain", "line_start": 0, "line_end": 10,
+         "gain_db": -22.0, "source": "cloud"},
+        {"cue_type": "sfx", "tag": "sword_clash", "line_start": 5, "at_anchor": "end",
+         "gain_db": -12.0, "source": "cloud"},
+    ])
+    assert n == 2
+    cues = sm.get_cues_for_chapter(ch_id)
+    assert len(cues) == 2
+    scene = next(c for c in cues if c["cue_type"] == "scene")
+    assert scene["tag"] == "cold_rain"
+    assert scene["line_end"] == 10
+    sfx = next(c for c in cues if c["cue_type"] == "sfx")
+    assert sfx["at_anchor"] == "end"
+    assert sfx["line_end"] is None
+
+    # replace fully wipes the prior set
+    sm.replace_chapter_cues(ch_id, [
+        {"cue_type": "music", "tag": "dread_low_drone", "line_start": 0,
+         "gain_db": -20.0, "duration_s": 8.0},
+    ])
+    cues2 = sm.get_cues_for_chapter(ch_id)
+    assert len(cues2) == 1
+    assert cues2[0]["cue_type"] == "music"
+    assert cues2[0]["duration_s"] == 8.0
+    print("  PASS test_replace_chapter_cues_atomic")
+
+
+def test_delete_chapter_cues():
+    sm = _tmp_db()
+    ch_id = _seed_one_chapter(sm)
+    sm.replace_chapter_cues(ch_id, [
+        {"cue_type": "scene", "tag": "forest_night", "line_start": 0, "line_end": 3},
+    ])
+    assert sm.delete_chapter_cues(ch_id) == 1
+    assert sm.get_cues_for_chapter(ch_id) == []
+    print("  PASS test_delete_chapter_cues")
+
+
+def test_mark_cues_reviewed_flag():
+    sm = _tmp_db()
+    pid = sm.seed_project(_make_parsed_book(n_chapters=1))
+    ch_id = sm.get_all_chapters(pid)[0]["id"]
+
+    assert sm.get_all_chapters(pid)[0]["cues_reviewed"] == 0
+    sm.mark_cues_reviewed(ch_id, True)
+    assert sm.get_all_chapters(pid)[0]["cues_reviewed"] == 1
+    sm.mark_cues_reviewed(ch_id, False)
+    assert sm.get_all_chapters(pid)[0]["cues_reviewed"] == 0
+    print("  PASS test_mark_cues_reviewed_flag")
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 TESTS = [
@@ -285,6 +390,12 @@ TESTS = [
     test_get_chapters_by_status,
     test_delete_voice,
     test_mark_chapter_status_stores_file_size,
+    test_sfx_asset_upsert_and_map,
+    test_sfx_asset_delete,
+    test_get_all_sfx_ordered_by_category,
+    test_replace_chapter_cues_atomic,
+    test_delete_chapter_cues,
+    test_mark_cues_reviewed_flag,
 ]
 
 if __name__ == "__main__":

@@ -115,6 +115,10 @@ class PipelineConfig:
     # Assembly
     output_format:        str   = "mp3"
     min_lines_threshold:  float = 0.5
+    # Sound design (opt-in, CPU-only): layer ambience/sfx/music under the voice
+    # when a chapter has cues. Off => assembly is identical to before.
+    sfx_enabled:          bool = False
+    sfx_dir:              str  = "data/sfx"
 
     # Behaviour
     vram_check_enabled:   bool = True
@@ -501,6 +505,8 @@ class PipelineOrchestrator:
             cfg={
                 "output_format":        self.cfg.output_format,
                 "min_completion_ratio": self.cfg.min_lines_threshold,
+                "sfx_enabled":          self.cfg.sfx_enabled,
+                "sfx_dir":              self.cfg.sfx_dir,
             },
         )
         asm.assemble_chapter(chapter_id)

@@ -14,6 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+import sound_designer
 from state_manager import StateManager
 from audio_assembler import AudioAssembler, _DEFAULT_CFG
 
@@ -384,6 +385,85 @@ def test_assemble_chapter_ffmpeg_receives_correct_list():
     print("  PASS test_assemble_chapter_ffmpeg_receives_correct_list")
 
 
+# ── Sound-design routing (opt-in) ─────────────────────────────────────────────
+
+def test_sfx_disabled_uses_plain_concat_path():
+    """With sfx_enabled False (default), the plain concat path runs even if cues exist."""
+    sm = _tmp_sm()
+    _, ch_id = _seed_chapter_with_tts_lines(sm, n_lines=2)
+    sm.replace_chapter_cues(ch_id, [
+        {"cue_type": "scene", "tag": "cold_rain", "line_start": 0, "line_end": 1},
+    ])
+    with tempfile.TemporaryDirectory() as wav_dir, \
+         tempfile.TemporaryDirectory() as out_dir:
+        lines = sm.get_pending_tts_lines(ch_id)
+        for i, line in enumerate(lines):
+            wav = _make_real_wav(Path(wav_dir) / f"line_{i:04d}.wav")
+            sm.mark_line_tts_done(line["id"], str(wav))
+
+        used = {"plain": False, "sound_design": False}
+        asm = AudioAssembler(sm, out_dir)            # sfx_enabled defaults False
+        asm._check_ffmpeg = lambda: None
+        def fake_plain(lp, op):
+            used["plain"] = True
+            op.write_bytes(b"X" * 5000)
+        asm._run_ffmpeg = fake_plain
+        asm._assemble_with_sound_design = lambda *a, **k: used.__setitem__("sound_design", True)
+        asm.assemble_chapter(ch_id)
+
+    assert used["plain"] is True
+    assert used["sound_design"] is False
+    print("  PASS test_sfx_disabled_uses_plain_concat_path")
+
+
+def test_sfx_enabled_routes_through_sound_designer():
+    """sfx_enabled + cues => concat to voice bus then a ducked mix via SoundDesigner."""
+    sm = _tmp_sm()
+    pid, ch_id = _seed_chapter_with_tts_lines(sm, n_lines=3)
+
+    with tempfile.TemporaryDirectory() as wav_dir, \
+         tempfile.TemporaryDirectory() as out_dir, \
+         tempfile.TemporaryDirectory() as sfx_dir:
+
+        lines = sm.get_pending_tts_lines(ch_id)
+        for i, line in enumerate(lines):
+            wav = _make_real_wav(Path(wav_dir) / f"line_{i:04d}.wav", duration_ms=120)
+            sm.mark_line_tts_done(line["id"], str(wav))
+
+        amb = _make_real_wav(Path(sfx_dir) / "cold_rain.wav", duration_ms=500)
+        sm.set_sfx_asset("cold_rain", "ambience", str(amb), loopable=True)
+        sm.replace_chapter_cues(ch_id, [
+            {"cue_type": "scene", "tag": "cold_rain", "line_start": 0,
+             "line_end": 2, "gain_db": -22.0},
+        ])
+
+        # Capture the FFmpeg commands SoundDesigner would run; write the output.
+        calls = []
+        orig_run = sound_designer.SoundDesigner._run
+        def fake_sd_run(cmd):
+            calls.append(cmd)
+            Path(cmd[-1]).write_bytes(b"X" * 5000)
+        sound_designer.SoundDesigner._run = staticmethod(fake_sd_run)
+        try:
+            asm = AudioAssembler(sm, out_dir, cfg={"sfx_enabled": True})
+            asm._check_ffmpeg = lambda: None
+            asm._run_voice_bus = lambda lp, op, nch: _make_real_wav(op, duration_ms=50)
+            result = asm.assemble_chapter(ch_id)
+        finally:
+            sound_designer.SoundDesigner._run = orig_run
+
+        assert Path(result).exists()
+        # the mix pass ran with a ducked filter graph referencing the ambience clip
+        assert any("-filter_complex" in c for c in calls), calls
+        graph = next(c[c.index("-filter_complex") + 1] for c in calls
+                     if "-filter_complex" in c)
+        assert "sidechaincompress" in graph
+
+    chapter = sm.get_all_chapters(pid)[0]
+    assert chapter["status"] == "complete"
+    print("  PASS test_sfx_enabled_routes_through_sound_designer")
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 TESTS = [
@@ -401,6 +481,8 @@ TESTS = [
     test_assemble_chapter_raises_with_zero_lines,
     test_assemble_chapter_records_file_size,
     test_assemble_chapter_ffmpeg_receives_correct_list,
+    test_sfx_disabled_uses_plain_concat_path,
+    test_sfx_enabled_routes_through_sound_designer,
 ]
 
 if __name__ == "__main__":

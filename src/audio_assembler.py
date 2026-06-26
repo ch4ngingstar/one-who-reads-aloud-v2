@@ -31,6 +31,7 @@ import wave
 from pathlib import Path
 
 from state_manager import StateManager, _resolve_stored_path
+from sound_designer import SoundDesigner
 
 
 def _concat_entry(p: Path) -> str:
@@ -47,6 +48,10 @@ _DEFAULT_CFG = {
     "output_sample_rate":       44100,
     "output_channels":          1,     # mono — smaller files, standard for audiobooks
     "min_completion_ratio":     0.5,   # abort if fewer than 50% of lines are tts_done
+    # ── Sound design (opt-in; off => behaviour identical to before) ──
+    "sfx_enabled":              False, # layer ambience/sfx/music when cues exist
+    "sfx_dir":                  "data/sfx",
+    "sfx_channels":             2,     # cinematic mix is stereo (beds need width)
 }
 
 
@@ -140,8 +145,19 @@ class AudioAssembler:
             list_content = self._build_concat_list(tts_done, silence_paths)
             list_path.write_text(list_content, encoding="utf-8")
 
-            # Run FFmpeg
-            self._run_ffmpeg(list_path, output_path)
+            cues = (
+                self.sm.get_cues_for_chapter(chapter_id)
+                if self.cfg.get("sfx_enabled") else []
+            )
+            if cues:
+                # Sound-design path: concat -> lossless voice bus, then mix
+                # ambience/sfx/music under it (CPU-only, additive, never fatal).
+                self._assemble_with_sound_design(
+                    chapter_id, tts_done, list_path, tmp_path, output_path, cues
+                )
+            else:
+                # Default path — single-pass concat+encode, unchanged.
+                self._run_ffmpeg(list_path, output_path)
 
         # Guard against FFmpeg producing an empty/corrupt file with exit 0
         actual_size = output_path.stat().st_size if output_path.exists() else 0
@@ -238,6 +254,62 @@ class AudioAssembler:
         if result.returncode != 0:
             raise RuntimeError(
                 f"FFmpeg failed (exit {result.returncode}):\n{result.stderr[-1000:]}"
+            )
+
+    # ── Sound design (pass 2) ─────────────────────────────────────────────────
+
+    def _assemble_with_sound_design(
+        self,
+        chapter_id: int,
+        tts_done: list,
+        list_path: Path,
+        tmp_path: Path,
+        output_path: Path,
+        cues: list,
+    ) -> None:
+        """Concat to a lossless voice bus, then mix cues under it (SoundDesigner).
+
+        The timeline is computed from the SAME line durations + silence gaps that
+        were concatenated, so cue offsets are exact. Strictly additive: a failed
+        mix falls back to encoding the plain voice bus inside SoundDesigner.render.
+        """
+        n_ch = int(self.cfg.get("sfx_channels", 2))
+        voice_bus = tmp_path / "voice_bus.wav"
+        self._run_voice_bus(list_path, voice_bus, n_ch)
+
+        sd = SoundDesigner(cfg=self.cfg)
+        timeline, _ = sd.build_timeline(
+            tts_done,
+            self.cfg["inter_line_silence_ms"],
+            self.cfg["inter_speaker_silence_ms"],
+        )
+        try:  # alias map is optional; cue_io ships it once Phase 5 lands
+            from cue_io import SFX_TAG_ALIASES
+        except Exception:
+            SFX_TAG_ALIASES = {}
+
+        resolved = sd.resolve_cues(
+            cues, self.sm.get_sfx_map(), timeline, alias_map=SFX_TAG_ALIASES
+        )
+        print(f"[assemble] sound design: {len(resolved)}/{len(cues)} cues "
+              f"applied -> {n_ch}ch mix")
+        sd.render(voice_bus, resolved, output_path, n_channels=n_ch)
+
+    def _run_voice_bus(self, list_path: Path, out_path: Path, n_channels: int) -> None:
+        """Concat the line/silence WAVs into a lossless stereo voice bus."""
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "concat", "-safe", "0",
+            "-i", str(list_path),
+            "-ar", str(self.cfg["output_sample_rate"]),
+            "-ac", str(n_channels),
+            str(out_path),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"FFmpeg voice-bus concat failed (exit {result.returncode}):\n"
+                f"{result.stderr[-1000:]}"
             )
 
     @staticmethod
