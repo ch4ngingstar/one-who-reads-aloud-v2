@@ -582,6 +582,124 @@ def test_post_diarize_cloud_routes_provider_and_model():
     print("  PASS test_post_diarize_cloud_routes_provider_and_model")
 
 
+# ── Sound design: sfx library + cues ──────────────────────────────────────────
+
+def test_sfx_set_list_delete():
+    client, sm, _ = _make_client()
+    with tempfile.TemporaryDirectory() as tmp:
+        clip = _make_valid_wav(Path(tmp) / "cold_rain.wav")
+        r = client.post("/api/sfx", json={"tag": "cold_rain", "category": "ambience",
+                                          "audio_path": str(clip)})
+        assert r.status_code == 201, r.text
+        listing = client.get("/api/sfx").json()["sfx"]
+        assert any(s["tag"] == "cold_rain" and s["category"] == "ambience" for s in listing)
+        assert client.delete("/api/sfx/cold_rain").status_code == 200
+        assert client.delete("/api/sfx/cold_rain").status_code == 404
+    print("  PASS test_sfx_set_list_delete")
+
+
+def test_sfx_set_bad_category():
+    client, _, _ = _make_client()
+    with tempfile.TemporaryDirectory() as tmp:
+        clip = _make_valid_wav(Path(tmp) / "x.wav")
+        r = client.post("/api/sfx", json={"tag": "x", "category": "bogus",
+                                          "audio_path": str(clip)})
+        assert r.status_code == 400, r.text
+    print("  PASS test_sfx_set_bad_category")
+
+
+def test_cues_put_get_roundtrip_marks_reviewed():
+    client, sm, _ = _make_client()
+    ch_id = _seed_one_chapter(sm, "The hall was silent. Rain fell.")
+    body = {"cues": [
+        {"cue_type": "scene", "tag": "cold_rain", "line_start": 0, "line_end": 0,
+         "gain_db": -22.0},
+    ]}
+    r = client.put(f"/api/chapters/{ch_id}/cues", json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()["reviewed"] is True
+
+    got = client.get(f"/api/chapters/{ch_id}/cues").json()
+    assert got["reviewed"] is True
+    assert len(got["cues"]) == 1 and got["cues"][0]["tag"] == "cold_rain"
+    assert got["cues"][0]["source"] == "manual"
+    print("  PASS test_cues_put_get_roundtrip_marks_reviewed")
+
+
+def _patch_cue_formatter(monkey_return, capture=None):
+    import api
+    original = api.cio.format_cues_via_cloud
+
+    def fake(export_payload, *, provider="claude", api_key, model=None, **kw):
+        if capture is not None:
+            capture.update(provider=provider, api_key=api_key, model=model)
+        return monkey_return(export_payload)
+
+    api.cio.format_cues_via_cloud = fake
+    return lambda: setattr(api.cio, "format_cues_via_cloud", original)
+
+
+def test_cues_cloud_imports():
+    client, sm, _ = _make_client()
+    ch_id = _seed_one_chapter(sm, "The hall was silent. Rain fell outside.")
+
+    def fake_sd(export_payload):
+        n = len(export_payload["segments"])
+        return {"sound_design": {"scenes": [
+            {"line_start": 0, "line_end": n - 1, "ambience_tag": "cold_rain", "gain_db": -22}]}}
+
+    restore = _patch_cue_formatter(fake_sd)
+    try:
+        r = client.post(f"/api/chapters/{ch_id}/cues-cloud", json={"api_key": "sk-ant-test"})
+        assert r.status_code == 200, r.text
+        assert r.json()["cues"] == 1
+        assert sm.get_cues_for_chapter(ch_id)[0]["tag"] == "cold_rain"
+    finally:
+        restore()
+    print("  PASS test_cues_cloud_imports")
+
+
+def test_cues_cloud_review_lock_conflict():
+    client, sm, _ = _make_client()
+    ch_id = _seed_one_chapter(sm, "A line of prose.")
+    # hand-edit cues -> reviewed lock
+    client.put(f"/api/chapters/{ch_id}/cues",
+               json={"cues": [{"cue_type": "scene", "tag": "forest_night",
+                               "line_start": 0, "line_end": 0}]})
+    restore = _patch_cue_formatter(lambda p: {"sound_design": {"scenes": []}})
+    try:
+        r = client.post(f"/api/chapters/{ch_id}/cues-cloud", json={"api_key": "sk-ant-test"})
+        assert r.status_code == 409, r.text
+        r2 = client.post(f"/api/chapters/{ch_id}/cues-cloud",
+                         json={"api_key": "sk-ant-test", "force": True})
+        assert r2.status_code == 200, r2.text
+    finally:
+        restore()
+    print("  PASS test_cues_cloud_review_lock_conflict")
+
+
+def test_cues_import_raw_payload():
+    client, sm, _ = _make_client()
+    ch_id = _seed_one_chapter(sm, "The hall was silent.")
+    n = len(sm.get_chunks_for_chapter(ch_id))  # >=1 segment
+    payload = {"sound_design": {"sfx": [
+        {"line_index": 0, "at": "start", "sfx_tag": "door_creak", "gain_db": -12}]}}
+    r = client.post(f"/api/chapters/{ch_id}/cues/import", json=payload)
+    assert r.status_code == 200, r.text
+    assert r.json()["cues"] == 1
+    print("  PASS test_cues_import_raw_payload")
+
+
+def test_cues_export_shape():
+    client, sm, _ = _make_client()
+    ch_id = _seed_one_chapter(sm, "The hall was silent.")
+    r = client.get(f"/api/chapters/{ch_id}/cues-export")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "vocabulary" in body and "segments" in body
+    print("  PASS test_cues_export_shape")
+
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
 def _cleanup():
@@ -625,6 +743,13 @@ TESTS = [
     test_post_diarize_cloud_missing_key,
     test_post_diarize_cloud_force_conflict,
     test_post_diarize_cloud_routes_provider_and_model,
+    test_sfx_set_list_delete,
+    test_sfx_set_bad_category,
+    test_cues_put_get_roundtrip_marks_reviewed,
+    test_cues_cloud_imports,
+    test_cues_cloud_review_lock_conflict,
+    test_cues_import_raw_payload,
+    test_cues_export_shape,
 ]
 
 if __name__ == "__main__":

@@ -49,6 +49,7 @@ from orchestrator  import PipelineOrchestrator, PipelineConfig
 from epub_parser   import parse_epub
 from qa_audit      import audit_project, AuditConfig
 import diarization_io as dio
+import cue_io as cio
 
 
 # ── Pydantic request/response models ─────────────────────────────────────────
@@ -74,6 +75,7 @@ class PipelineStart(BaseModel):
     output_format:      str   = "mp3"
     vram_check_enabled: bool  = True
     batch_size:         int   = 8   # chapters per LLM/TTS load-unload cycle (measured swap tax ~47s/ch, mostly the 40s TTS load)
+    sfx_enabled:        bool  = False  # layer ambience/sfx/music under the voice (CPU-only)
 
     @property
     def resolved_model_dir(self) -> str:
@@ -108,6 +110,35 @@ class CloudDiarizeRequest(BaseModel):
     model:    Optional[str] = None      # overrides the provider default
     force:    bool = False
     api_key:  Optional[str] = None      # browser-supplied; falls back to server env var
+
+
+class SfxSet(BaseModel):
+    tag:          str
+    category:     str                   # ambience | sfx | music
+    audio_path:   str
+    display_name: Optional[str] = None
+    loopable:     bool = True
+
+
+class CueItem(BaseModel):
+    cue_type:   str                     # scene | sfx | music
+    tag:        str
+    line_start: int
+    line_end:   Optional[int]   = None
+    at_anchor:  Optional[str]   = None
+    gain_db:    float           = -20.0
+    duration_s: Optional[float] = None
+
+
+class CuesReplace(BaseModel):
+    cues: list[CueItem]
+
+
+class CloudCuesRequest(BaseModel):
+    provider: str = "claude"
+    model:    Optional[str] = None
+    force:    bool = False
+    api_key:  Optional[str] = None
 
 
 # ── Pipeline manager ──────────────────────────────────────────────────────────
@@ -228,8 +259,11 @@ _SRC_DIR  = Path(__file__).resolve().parent
 _ROOT_DIR = _SRC_DIR.parent
 _DATA_DIR = _SRC_DIR / "data"              # DB + uploaded voices (legacy layout)
 _VOICES_DIR    = _DATA_DIR / "voices"
+_SFX_DIR       = _ROOT_DIR / "data" / "sfx"     # sound-design library (ambience/sfx/music)
 _AUDIO_WAV_DIR = _ROOT_DIR / "data" / "audio"
 _AUDIO_MP3_DIR = _ROOT_DIR / "data" / "output"
+
+_SFX_CATEGORIES = {"ambience", "sfx", "music"}
 
 
 def _resolve_data_path(p: "str | Path") -> Path:
@@ -273,6 +307,39 @@ def _normalize_voice_clip(raw_bytes: bytes, dest: Path) -> bool:
             ],
             capture_output=True,
             timeout=60,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+    finally:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+
+
+def _normalize_sfx_clip(raw_bytes: bytes, dest: Path, stereo: bool) -> bool:
+    """Transcode a sound-design clip to 16-bit PCM WAV at 44.1 kHz.
+
+    Ambience/music keep stereo width; discrete sfx are mono. No loudness
+    normalisation — the mixer controls levels per cue (volume + limiter).
+    Returns True on success; callers fall back to saving the raw bytes.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".tmp", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+        tmp_path.write_bytes(raw_bytes)
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", str(tmp_path),
+                "-c:a", "pcm_s16le",
+                "-ar", "44100",
+                "-ac", "2" if stereo else "1",
+                str(dest),
+            ],
+            capture_output=True,
+            timeout=120,
         )
         return result.returncode == 0
     except Exception:
@@ -407,6 +474,8 @@ async def start_pipeline(
         output_format     = req.output_format,
         vram_check_enabled= req.vram_check_enabled,
         batch_size        = max(1, req.batch_size),
+        sfx_enabled       = req.sfx_enabled,
+        sfx_dir           = str(_SFX_DIR),
     )
 
     try:
@@ -623,6 +692,99 @@ async def post_chapter_diarize_cloud(
     return {"chapter_id": chapter_id, "lines": n, "status": "diarized"}
 
 
+# ── Sound-design cues (per chapter) ─────────────────────────────────────────
+
+def _cue_reject_http(e: "dio.ImportRejected"):
+    msg = str(e)
+    if "manually reviewed" in msg:
+        return HTTPException(status_code=409, detail=msg)
+    if "no chapter" in msg:
+        return HTTPException(status_code=404, detail=msg)
+    return HTTPException(status_code=400, detail=msg)
+
+
+@app.get("/api/chapters/{chapter_id}/cues-export")
+async def get_chapter_cues_export(chapter_id: int, sm: StateManager = Depends(get_sm)):
+    """Export a chapter's segments + cue vocabulary for external/manual authoring."""
+    try:
+        return cio.build_cue_export(sm, chapter_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/api/chapters/{chapter_id}/cues")
+async def get_chapter_cues(chapter_id: int, sm: StateManager = Depends(get_sm)):
+    """Current sound-design cues for a chapter (+ whether they were hand-edited)."""
+    ch = sm.get_chapter_by_id(chapter_id)
+    if ch is None:
+        raise HTTPException(status_code=404, detail="Chapter not found.")
+    return {
+        "chapter_id": chapter_id,
+        "cues": sm.get_cues_for_chapter(chapter_id),
+        "reviewed": bool(ch.get("cues_reviewed")),
+    }
+
+
+@app.put("/api/chapters/{chapter_id}/cues")
+async def put_chapter_cues(
+    chapter_id: int,
+    payload: CuesReplace,
+    sm: StateManager = Depends(get_sm),
+):
+    """Replace a chapter's cues with a hand-edited set; marks it reviewed (locks
+    it against being overwritten by a later auto cloud-generate)."""
+    ch = sm.get_chapter_by_id(chapter_id)
+    if ch is None:
+        raise HTTPException(status_code=404, detail="Chapter not found.")
+    cues = [c.model_dump() for c in payload.cues]
+    for c in cues:
+        c["source"] = "manual"
+    n = sm.replace_chapter_cues(chapter_id, cues)
+    sm.mark_cues_reviewed(chapter_id, True)
+    return {"chapter_id": chapter_id, "cues": n, "reviewed": True}
+
+
+@app.post("/api/chapters/{chapter_id}/cues-cloud")
+async def post_chapter_cues_cloud(
+    chapter_id: int,
+    payload: CloudCuesRequest,
+    sm: StateManager = Depends(get_sm),
+):
+    """One-shot cloud sound design: export segments -> cloud LLM -> import cues.
+
+    Mirrors diarize-cloud: provider claude|openai|gemini, key from the request or
+    the matching server env var, used only for this call and never persisted."""
+    provider = (payload.provider or "claude").strip().lower()
+    env_var = _PROVIDER_ENV.get(provider, "ANTHROPIC_API_KEY")
+    api_key = (payload.api_key or "").strip() or os.environ.get(env_var, "")
+    try:
+        export_payload = cio.build_cue_export(sm, chapter_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    try:
+        sd = cio.format_cues_via_cloud(
+            export_payload, provider=provider, api_key=api_key, model=payload.model)
+        n = cio.import_cues(sm, chapter_id, sd, force=payload.force)
+    except dio.ImportRejected as e:
+        raise _cue_reject_http(e)
+    return {"chapter_id": chapter_id, "cues": n}
+
+
+@app.post("/api/chapters/{chapter_id}/cues/import")
+async def post_chapter_cues_import(
+    chapter_id: int,
+    payload: dict,
+    force: bool = False,
+    sm: StateManager = Depends(get_sm),
+):
+    """Import a raw {"sound_design": {...}} cue plan (e.g. pasted from Claude)."""
+    try:
+        n = cio.import_cues(sm, chapter_id, payload, force=force)
+    except dio.ImportRejected as e:
+        raise _cue_reject_http(e)
+    return {"chapter_id": chapter_id, "cues": n}
+
+
 @app.delete("/api/chapters/{chapter_id}/audio")
 async def delete_chapter_audio(
     chapter_id: int,
@@ -778,6 +940,93 @@ async def serve_voice_audio(speaker: str, sm: StateManager = Depends(get_sm)):
             detail=f"Reference clip for '{speaker}' is missing on disk: {voice['path']}",
         )
 
+    media_type = _VOICE_MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream")
+    return FileResponse(str(path), media_type=media_type, filename=path.name)
+
+
+# ── Sound-design library (sfx assets) ──────────────────────────────────────────
+
+@app.get("/api/sfx")
+async def list_sfx(sm: StateManager = Depends(get_sm)):
+    """All registered sound-design clips, grouped (UI groups by category)."""
+    return {"sfx": sm.get_all_sfx()}
+
+
+@app.post("/api/sfx", status_code=201)
+async def set_sfx(req: SfxSet, sm: StateManager = Depends(get_sm)):
+    if req.category not in _SFX_CATEGORIES:
+        raise HTTPException(status_code=400,
+                            detail=f"category must be one of {sorted(_SFX_CATEGORIES)}")
+    if not Path(req.audio_path).exists():
+        raise HTTPException(status_code=400,
+                            detail=f"Audio file not found: {req.audio_path}")
+    sm.set_sfx_asset(req.tag, req.category, req.audio_path, req.display_name, req.loopable)
+    return {"tag": req.tag, "category": req.category, "audio_path": req.audio_path}
+
+
+@app.post("/api/sfx/upload", status_code=201)
+async def upload_sfx(
+    tag:          str = Form(...),
+    category:     str = Form(...),
+    loopable:     bool = Form(True),
+    display_name: str = Form(""),
+    file:         UploadFile = File(...),
+    sm:           StateManager = Depends(get_sm),
+):
+    """Upload a sound-design clip into the tagged library."""
+    category = category.strip().lower()
+    if category not in _SFX_CATEGORIES:
+        raise HTTPException(status_code=400,
+                            detail=f"category must be one of {sorted(_SFX_CATEGORIES)}")
+
+    slug = re.sub(r"[^a-z0-9]+", "_", (tag or "").lower()).strip("_")
+    if not slug:
+        raise HTTPException(status_code=400,
+                            detail=f"Tag '{tag}' has no usable characters.")
+
+    ext = Path(file.filename or "").suffix.lower() or ".wav"
+    if ext not in _ALLOWED_VOICE_EXTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported audio format '{ext}'. "
+                   f"Allowed: {', '.join(sorted(_ALLOWED_VOICE_EXTS))}")
+
+    content = await file.read()
+    if len(content) < 512:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty or too small.")
+
+    cat_dir = _SFX_DIR / category
+    cat_dir.mkdir(parents=True, exist_ok=True)
+
+    # Ambience/music keep stereo width; discrete sfx are mono.
+    dest = cat_dir / f"{slug}.wav"
+    if not _normalize_sfx_clip(content, dest, stereo=(category != "sfx")):
+        dest = cat_dir / f"{slug}{ext}"
+        dest.write_bytes(content)
+
+    sm.set_sfx_asset(slug, category, str(dest), display_name or None, loopable)
+    return {"tag": slug, "category": category, "audio_path": str(dest),
+            "loopable": loopable}
+
+
+@app.delete("/api/sfx/{tag}")
+async def delete_sfx(tag: str, sm: StateManager = Depends(get_sm)):
+    """Remove a sound-design asset mapping (does not delete the file on disk)."""
+    if not sm.delete_sfx_asset(tag):
+        raise HTTPException(status_code=404, detail=f"Sound '{tag}' not found.")
+    return {"deleted": tag}
+
+
+@app.get("/api/sfx/{tag}/audio")
+async def serve_sfx_audio(tag: str, sm: StateManager = Depends(get_sm)):
+    """Stream a library clip so the UI can preview it."""
+    asset = sm.get_sfx_map().get(tag)
+    if asset is None:
+        raise HTTPException(status_code=404, detail=f"Sound '{tag}' not found.")
+    path = _resolve_data_path(asset["path"])
+    if not path.exists():
+        raise HTTPException(status_code=404,
+                            detail=f"Clip for '{tag}' is missing on disk: {asset['path']}")
     media_type = _VOICE_MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream")
     return FileResponse(str(path), media_type=media_type, filename=path.name)
 
