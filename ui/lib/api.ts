@@ -1,4 +1,7 @@
-import type { Chapter, Line, Progress, Project, PipelineStatusResponse, Voice } from './types'
+import type {
+  Chapter, Line, Progress, Project, PipelineStatusResponse, Voice,
+  SfxAsset, SfxCategory, Cue,
+} from './types'
 
 const BASE = '/api'
 
@@ -61,6 +64,7 @@ export async function startPipeline(params: {
   chapter_range?: [number, number] | null
   output_format?: string
   vram_check_enabled?: boolean
+  sfx_enabled?: boolean
 }): Promise<{ status: string }> {
   return req('/pipeline/start', { method: 'POST', body: JSON.stringify(params) })
 }
@@ -176,4 +180,90 @@ export async function resetChapters(params: {
   chapter_range?: [number, number] | null
 }): Promise<{ reset: number[]; count: number }> {
   return req('/chapters/reset-range', { method: 'POST', body: JSON.stringify(params) })
+}
+
+// ── Sound design: library (sfx assets) ──────────────────────────────────────
+
+export async function getSfx(): Promise<{ sfx: SfxAsset[] }> {
+  return req('/sfx')
+}
+
+export async function uploadSfx(
+  tag: string,
+  category: SfxCategory,
+  file: File,
+  opts?: { loopable?: boolean; displayName?: string },
+): Promise<{ tag: string; category: string; audio_path: string; loopable: boolean }> {
+  const form = new FormData()
+  form.append('tag', tag)
+  form.append('category', category)
+  form.append('loopable', String(opts?.loopable ?? category !== 'sfx'))
+  if (opts?.displayName) form.append('display_name', opts.displayName)
+  form.append('file', file)
+  const res = await fetch(`${BASE}/sfx/upload`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body?.detail ?? `${res.status}`)
+  }
+  return res.json()
+}
+
+export async function deleteSfx(tag: string): Promise<void> {
+  await req(`/sfx/${encodeURIComponent(tag)}`, { method: 'DELETE' })
+}
+
+export function sfxAudioUrl(tag: string): string {
+  return `${BASE}/sfx/${encodeURIComponent(tag)}/audio`
+}
+
+// ── Sound design: per-chapter cues ──────────────────────────────────────────
+
+export async function getCues(
+  chapterId: number,
+): Promise<{ chapter_id: number; cues: Cue[]; reviewed: boolean }> {
+  return req(`/chapters/${chapterId}/cues`)
+}
+
+/** Replace a chapter's cues with a hand-edited set; marks it reviewed. */
+export async function putCues(
+  chapterId: number,
+  cues: Cue[],
+): Promise<{ chapter_id: number; cues: number; reviewed: boolean }> {
+  return req(`/chapters/${chapterId}/cues`, {
+    method: 'PUT',
+    body: JSON.stringify({ cues }),
+  })
+}
+
+/** One-click cloud sound design: server exports segments, calls the chosen
+ *  cloud LLM, and imports the cue plan. Key sent per request, never persisted. */
+export async function generateCuesCloud(
+  chapterId: number,
+  params: { provider: DiarizeProvider; apiKey: string; model?: string; force?: boolean },
+): Promise<{ chapter_id: number; cues: number }> {
+  return req(`/chapters/${chapterId}/cues-cloud`, {
+    method: 'POST',
+    body: JSON.stringify({
+      provider: params.provider,
+      api_key: params.apiKey,
+      model: params.model,
+      force: params.force ?? false,
+    }),
+  })
+}
+
+/** Import a raw {"sound_design": {...}} cue plan (e.g. pasted from Claude). */
+export async function importCues(
+  chapterId: number,
+  payload: unknown,
+  force = false,
+): Promise<{ chapter_id: number; cues: number }> {
+  return req(`/chapters/${chapterId}/cues/import${force ? '?force=true' : ''}`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function cuesExportUrl(chapterId: number): string {
+  return `${BASE}/chapters/${chapterId}/cues-export`
 }

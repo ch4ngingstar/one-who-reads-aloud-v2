@@ -62,6 +62,34 @@ export interface Line {
   error_message: string | null
 }
 
+export type SfxCategory = 'ambience' | 'sfx' | 'music'
+
+export interface SfxAsset {
+  id: number
+  tag: string
+  category: SfxCategory
+  audio_path: string
+  display_name: string | null
+  loopable: number
+  created_at: string
+  updated_at: string
+}
+
+export type CueType = 'scene' | 'sfx' | 'music'
+
+export interface Cue {
+  id?: number
+  chapter_id?: number
+  cue_type: CueType
+  tag: string
+  line_start: number
+  line_end: number | null
+  at_anchor: 'start' | 'end' | null
+  gain_db: number
+  duration_s: number | null
+  source?: string
+}
+
 export interface PipelineStatusResponse {
   status: 'idle' | 'running' | 'paused' | 'complete' | 'error' | 'stopped'
   last_results: { success: number; error: number; skipped: number } | null
