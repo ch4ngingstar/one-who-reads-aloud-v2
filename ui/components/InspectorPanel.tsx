@@ -3,17 +3,17 @@ import { useEffect, useState } from 'react'
 import ConfirmButton from '@/components/ConfirmButton'
 import VoiceMapper from '@/components/VoiceMapper'
 import LiveLog from '@/components/LiveLog'
-import {
-  chapterSegmentsUrl, deleteChapterAudio, getLines, importChapterLabels, resetChapter,
-} from '@/lib/api'
+import DiarizePanel from '@/components/DiarizePanel'
+import { deleteChapterAudio, getLines, resetChapter } from '@/lib/api'
 import { formatMB, parseChapterError } from '@/lib/format'
 import type { Chapter, Line, SSEEvent, Voice } from '@/lib/types'
 import type { LiveLine, Stage } from '@/hooks/usePipelineState'
 
-export type SideTab = 'inspector' | 'voices' | 'forge' | 'log'
+export type SideTab = 'inspector' | 'diarize' | 'voices' | 'forge' | 'log'
 
 const TABS: { key: SideTab; label: string }[] = [
   { key: 'inspector', label: 'Inspector' },
+  { key: 'diarize',   label: 'Diarize' },
   { key: 'voices',    label: 'Voices' },
   { key: 'forge',     label: 'Forge' },
   { key: 'log',       label: 'Log' },
@@ -115,108 +115,6 @@ function LineRow({ line }: { line: Line }) {
   )
 }
 
-interface LabelResult { name: string; ok: boolean; message: string }
-
-/** Export a chapter's segments and import externally-formatted labels.
- *  Lets the user diarize anywhere (cloud LLM / hand) instead of the local LLM. */
-function ExternalDiarization({ chapter, onChanged }: {
-  chapter: Chapter; onChanged: () => void
-}) {
-  const [results, setResults] = useState<LabelResult[]>([])
-  const [busy, setBusy] = useState(false)
-  const [force, setForce] = useState(false)
-  const padded = String(chapter.id).padStart(4, '0')
-
-  async function handleUpload(files: FileList | null) {
-    if (!files || files.length === 0) return
-    setBusy(true)
-    const out: LabelResult[] = []
-    for (const file of Array.from(files)) {
-      const m = file.name.match(/ch_(\d+)\.labels\.json$/)
-      if (!m) {
-        out.push({ name: file.name, ok: false, message: 'not a ch_XXXX.labels.json file' })
-        continue
-      }
-      const chapterId = parseInt(m[1], 10)
-      try {
-        const body = JSON.parse(await file.text())
-        const data = await importChapterLabels(chapterId, body, force)
-        out.push({ name: file.name, ok: true, message: `diarized (${data.lines} lines)` })
-      } catch (err) {
-        out.push({ name: file.name, ok: false, message: err instanceof Error ? err.message : String(err) })
-      }
-    }
-    setResults(out)
-    setBusy(false)
-    if (out.some(r => r.ok)) onChanged()
-  }
-
-  return (
-    <section className="mt-5 pt-4 border-t border-[#1a1a1a]">
-      <div className="text-[9px] tracking-[2px] uppercase text-spell-g4 mb-2.5">
-        External diarization
-      </div>
-      <div className="flex gap-2">
-        <a
-          className="btn flex-1 text-center"
-          href={chapterSegmentsUrl(chapter.id)}
-          download={`ch_${padded}.segments.json`}
-        >↓ Export segments</a>
-        <label className="btn flex-1 text-center cursor-pointer" aria-disabled={busy}>
-          ↑ Import labels
-          <input
-            type="file"
-            accept=".json,application/json"
-            multiple
-            className="hidden"
-            disabled={busy}
-            onChange={e => handleUpload(e.target.files)}
-          />
-        </label>
-      </div>
-      <label className="flex items-center gap-1.5 mt-2 text-[10px] text-spell-g5 cursor-pointer select-none">
-        <input
-          type="checkbox"
-          checked={force}
-          disabled={busy}
-          onChange={e => setForce(e.target.checked)}
-        />
-        force overwrite (re-import past diarized — clears existing audio)
-      </label>
-      {results.length > 0 && (
-        <div className="mt-2.5 space-y-1">
-          {results.map(r => (
-            <p
-              key={r.name}
-              className={`text-[10px] leading-snug break-words ${r.ok ? 'text-emerald-500' : 'text-blood-text'}`}
-            >
-              {r.name}: {r.message}
-            </p>
-          ))}
-        </div>
-      )}
-    </section>
-  )
-}
-
-/** Download the finished labeled chapter (speaker + emotion + text per line)
- *  as a readable script. Reuses GET /chapters/{id}/lines — no backend change. */
-async function downloadDiarization(chapter: Chapter) {
-  const { lines } = await getLines(chapter.id)
-  const header = `Ch. ${chapter.chapter_index + 1} — ${chapter.title}\n` +
-                 `${lines.length} lines\n\n`
-  const body = lines.map((l, idx) =>
-    `[${String(idx + 1).padStart(4, '0')}] ${l.speaker} (${l.emotion}): ${l.text}`
-  ).join('\n')
-  const blob = new Blob([header + body], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `ch_${String(chapter.id).padStart(4, '0')}.diarization.txt`
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
 function ChapterDetail({ chapter, onPlay, onChanged }: {
   chapter: Chapter; onPlay: (id: number) => void; onChanged: () => void
 }) {
@@ -268,38 +166,31 @@ function ChapterDetail({ chapter, onPlay, onChanged }: {
           </div>
         )}
 
-        <div className="flex gap-2 mt-5">
+        <div className="mt-5 space-y-2">
           {complete && chapter.output_audio_path != null && (
-            <button className="btn flex-1" onClick={() => onPlay(chapter.id)}>▶ Play</button>
+            <button className="btn-primary w-full" onClick={() => onPlay(chapter.id)}>▶ Play chapter</button>
           )}
-          {hasDiarization && (
-            <button
-              className="btn flex-1"
-              onClick={() => downloadDiarization(chapter)}
-              title="Download the labeled chapter (speaker + emotion per line)"
-            >↓ Diarization</button>
-          )}
-          <ConfirmButton
-            className="btn flex-1"
-            confirmClassName="btn flex-1"
-            confirmLabel={failed ? 'Retry?' : 'Redo?'}
-            onConfirm={async () => { await resetChapter(chapter.id); onChanged() }}
-            ariaLabel={failed ? `Retry chapter ${num}` : `Redo chapter ${num}`}
-            title="Reset and re-run this chapter"
-          >↻ {failed ? 'Retry' : 'Redo'}</ConfirmButton>
-          {complete && (
+          <div className="flex gap-2">
             <ConfirmButton
-              className="btn-danger flex-1"
-              confirmClassName="btn-danger flex-1"
-              confirmLabel="Delete?"
-              onConfirm={async () => { await deleteChapterAudio(chapter.id); onChanged() }}
-              ariaLabel={`Delete audio for chapter ${num}`}
-              title="Delete audio from disk"
-            >✕ Delete</ConfirmButton>
-          )}
+              className="btn flex-1"
+              confirmClassName="btn flex-1"
+              confirmLabel={failed ? 'Retry?' : 'Redo?'}
+              onConfirm={async () => { await resetChapter(chapter.id); onChanged() }}
+              ariaLabel={failed ? `Retry chapter ${num}` : `Redo chapter ${num}`}
+              title="Reset and re-run this chapter"
+            >↻ {failed ? 'Retry' : 'Redo'}</ConfirmButton>
+            {complete && (
+              <ConfirmButton
+                className="btn-danger flex-1"
+                confirmClassName="btn-danger flex-1"
+                confirmLabel="Delete?"
+                onConfirm={async () => { await deleteChapterAudio(chapter.id); onChanged() }}
+                ariaLabel={`Delete audio for chapter ${num}`}
+                title="Delete audio from disk"
+              >✕ Delete</ConfirmButton>
+            )}
+          </div>
         </div>
-
-        <ExternalDiarization chapter={chapter} onChanged={onChanged} />
       </div>
 
       {hasDiarization && lines.length > 0 && (
@@ -325,7 +216,7 @@ export default function InspectorPanel({
         {TABS.map(t => (
           <button
             key={t.key}
-            className={`flex-1 text-center py-3 font-display text-[10px] tracking-[2.4px] uppercase border-b
+            className={`flex-1 text-center py-3 font-display text-[9px] tracking-[1.6px] uppercase border-b
                         transition-colors duration-100 ${
               tab === t.key
                 ? 'text-ink-hot border-ink-hot [text-shadow:0_0_12px_rgba(255,255,255,0.4)]'
@@ -352,6 +243,12 @@ export default function InspectorPanel({
               <span className="text-[11px] tracking-[0.18em] uppercase">Select a chapter to inspect</span>
             </div>
           ) : null}
+        </div>
+      )}
+
+      {tab === 'diarize' && (
+        <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          <DiarizePanel chapter={selectedChapter} onChanged={onChanged} />
         </div>
       )}
 

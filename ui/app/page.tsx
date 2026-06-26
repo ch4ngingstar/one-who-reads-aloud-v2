@@ -162,12 +162,14 @@ export default function CommandDeck() {
 
   function handleProjectCreated(
     p: Project, prog: Progress, llm: string, tts: string, spkList: string[], opts: GenOptions,
+    epub: string,
   ) {
     setProject(p); setProgress(prog); setLlmPath(llm); setTtsDir(tts)
+    setEpubPath(epub)
     setSpeakers(spkList.join(', ')); setOutputFormat(opts.outputFormat)
     setVramCheck(opts.vramCheck); setSideTab('voices')
     saveCfg({
-      projectName: p.name, llmPath: llm, ttsDir: tts, epubPath,
+      projectName: p.name, llmPath: llm, ttsDir: tts, epubPath: epub,
       speakers: spkList.join(', '),
       outputFormat: opts.outputFormat, vramCheck: opts.vramCheck,
     })

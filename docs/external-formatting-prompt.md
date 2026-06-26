@@ -22,6 +22,17 @@ The output contract is enforced on import (`enforce_labels`, shared with the loc
 Anything outside those sets is repaired (bad speaker→`Unknown`, bad emotion→`neutral`), so
 staying inside them is what makes a clean import.
 
+## Easiest path: one button in the UI
+
+Open a chapter, switch to the **Diarize** tab → under **Cloud diarization** pick a
+**provider** (Claude / ChatGPT / Gemini), optionally adjust the **model**, paste
+that provider's **API key** once (stored in the browser only, never on the server)
+→ click **Diarize this chapter**. That runs the whole round-trip server-side
+(export → cloud LLM → import) and flips the chapter to `diarized`. No files, no
+terminal. The server needs the chosen provider's SDK installed
+(`pip install anthropic` / `openai` / `google-generativeai`). The manual
+export/label/import steps below are still there for whole volumes or hand-labelling.
+
 ## End-to-end for any volume
 
 1. **Parse the EPUB into the project first** (`POST /api/project`) so the volume's chapters

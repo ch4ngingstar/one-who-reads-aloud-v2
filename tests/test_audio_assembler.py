@@ -217,7 +217,10 @@ def test_build_ffmpeg_cmd_contains_required_flags():
     assert "-safe"   in cmd
     assert "-ar"     in cmd
     assert "320k"    in cmd
-    assert "-filter:a" not in cmd  # loudnorm removed to preserve voice quality
+    # loudnorm removed to preserve voice quality — no audio filter of any form
+    assert "-af" not in cmd
+    assert "-filter:a" not in cmd
+    assert not any("loudnorm" in str(part) for part in cmd)
 
     print("  PASS test_build_ffmpeg_cmd_contains_required_flags")
 

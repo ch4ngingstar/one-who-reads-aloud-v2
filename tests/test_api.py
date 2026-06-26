@@ -52,6 +52,14 @@ def _make_tiny_wav(path: Path) -> Path:
     return path
 
 
+def _make_valid_wav(path: Path) -> Path:
+    """Create a WAV large enough to pass the 10 KB upload guard (~22 KB, 0.5 s)."""
+    with wave.open(str(path), "wb") as wf:
+        wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(22050)
+        wf.writeframes(b"\x00\x00" * 11025)
+    return path
+
+
 def _make_client(sm=None, mgr=None):
     """Create a TestClient with injected dependencies."""
     _sm  = sm  or _tmp_sm()
@@ -202,7 +210,7 @@ def test_upload_voice():
     client, _, _ = _make_client(sm=sm)
 
     with tempfile.TemporaryDirectory() as tmp:
-        wav_path = _make_tiny_wav(Path(tmp) / "test.wav")
+        wav_path = _make_valid_wav(Path(tmp) / "test.wav")
 
         with open(wav_path, "rb") as f:
             r = client.post(
@@ -486,6 +494,94 @@ def test_post_chapter_labels_stale_rejected():
     print("  PASS test_post_chapter_labels_stale_rejected")
 
 
+def _patch_cloud_formatter(monkey_return=None, capture=None):
+    """Patch api.dio.format_labels_via_cloud; returns a restore() callable.
+
+    `monkey_return` is a fn(export_payload) -> labels dict. `capture` (optional
+    dict) records the provider/model/api_key kwargs. The fake never hits the
+    network or any provider SDK."""
+    import api
+    original = api.dio.format_labels_via_cloud
+
+    def fake(export_payload, *, provider="claude", api_key, model=None, **kw):
+        if capture is not None:
+            capture.update(provider=provider, api_key=api_key, model=model)
+        return monkey_return(export_payload)
+
+    api.dio.format_labels_via_cloud = fake
+    return lambda: setattr(api.dio, "format_labels_via_cloud", original)
+
+
+def _narrator_labels(export_payload):
+    return {"labels": [{"i": s["i"], "speaker": "Narrator", "emotion": "neutral"}
+                       for s in export_payload["segments"]]}
+
+
+def test_post_diarize_cloud_imports():
+    client, sm, _ = _make_client()
+    ch_id = _seed_one_chapter(sm, "The hall was silent.")
+    restore = _patch_cloud_formatter(_narrator_labels)
+    try:
+        r = client.post(f"/api/chapters/{ch_id}/diarize-cloud",
+                        json={"api_key": "sk-ant-test"})
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "diarized"
+        assert sm.get_chapter_by_id(ch_id)["status"] == "diarized"
+    finally:
+        restore()
+    print("  PASS test_post_diarize_cloud_imports")
+
+
+def test_post_diarize_cloud_missing_key():
+    import os
+    client, sm, _ = _make_client()
+    ch_id = _seed_one_chapter(sm, "The hall was silent.")
+    saved = os.environ.pop("ANTHROPIC_API_KEY", None)  # ensure no env fallback
+    try:
+        r = client.post(f"/api/chapters/{ch_id}/diarize-cloud", json={})
+        assert r.status_code == 400, r.text
+        assert "key" in r.json()["detail"].lower()
+    finally:
+        if saved is not None:
+            os.environ["ANTHROPIC_API_KEY"] = saved
+    print("  PASS test_post_diarize_cloud_missing_key")
+
+
+def test_post_diarize_cloud_force_conflict():
+    client, sm, _ = _make_client()
+    ch_id = _seed_one_chapter(sm, "The hall was silent.")
+    restore = _patch_cloud_formatter(_narrator_labels)
+    try:
+        client.post(f"/api/chapters/{ch_id}/diarize-cloud", json={"api_key": "sk-ant-test"})
+        sm.mark_chapter_status(ch_id, "complete")
+        r = client.post(f"/api/chapters/{ch_id}/diarize-cloud", json={"api_key": "sk-ant-test"})
+        assert r.status_code == 409, r.text
+        r2 = client.post(f"/api/chapters/{ch_id}/diarize-cloud",
+                         json={"api_key": "sk-ant-test", "force": True})
+        assert r2.status_code == 200, r2.text
+    finally:
+        restore()
+    print("  PASS test_post_diarize_cloud_force_conflict")
+
+
+def test_post_diarize_cloud_routes_provider_and_model():
+    client, sm, _ = _make_client()
+    ch_id = _seed_one_chapter(sm, "The hall was silent.")
+    cap = {}
+    restore = _patch_cloud_formatter(_narrator_labels, capture=cap)
+    try:
+        r = client.post(f"/api/chapters/{ch_id}/diarize-cloud",
+                        json={"provider": "gemini", "model": "gemini-1.5-pro",
+                              "api_key": "AIza-test"})
+        assert r.status_code == 200, r.text
+        assert cap["provider"] == "gemini"
+        assert cap["model"] == "gemini-1.5-pro"
+        assert cap["api_key"] == "AIza-test"
+    finally:
+        restore()
+    print("  PASS test_post_diarize_cloud_routes_provider_and_model")
+
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
 def _cleanup():
@@ -525,6 +621,10 @@ TESTS = [
     test_post_chapter_labels_imports,
     test_post_chapter_labels_conflict_past_diarized,
     test_post_chapter_labels_stale_rejected,
+    test_post_diarize_cloud_imports,
+    test_post_diarize_cloud_missing_key,
+    test_post_diarize_cloud_force_conflict,
+    test_post_diarize_cloud_routes_provider_and_model,
 ]
 
 if __name__ == "__main__":

@@ -218,7 +218,7 @@ class AudioAssembler:
     # ── FFmpeg ────────────────────────────────────────────────────────────────
 
     def _build_ffmpeg_cmd(self, list_path: Path, output_path: Path) -> list[str]:
-        """Build the FFmpeg concat + encode command (no loudnorm — preserves voice quality)."""
+        """Build the FFmpeg concat + encode command."""
         cmd = [
             "ffmpeg", "-y",
             "-f", "concat", "-safe", "0",

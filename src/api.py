@@ -29,8 +29,11 @@ DATA FLOW into Module 8 (Next.js):
 
 import asyncio
 import json
+import os
 import re
 import sqlite3
+import subprocess
+import tempfile
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -98,6 +101,13 @@ class LabelEntry(BaseModel):
 class LabelsImport(BaseModel):
     chapter_id: Optional[int] = None   # echoed by exporter; path param is authoritative
     labels:     list[LabelEntry]
+
+
+class CloudDiarizeRequest(BaseModel):
+    provider: str = "claude"            # claude | openai | gemini
+    model:    Optional[str] = None      # overrides the provider default
+    force:    bool = False
+    api_key:  Optional[str] = None      # browser-supplied; falls back to server env var
 
 
 # ── Pipeline manager ──────────────────────────────────────────────────────────
@@ -233,6 +243,46 @@ def _resolve_data_path(p: "str | Path") -> Path:
         return root_candidate
     src_candidate = _SRC_DIR / path
     return src_candidate if src_candidate.exists() else root_candidate
+
+def _normalize_voice_clip(raw_bytes: bytes, dest: Path) -> bool:
+    """
+    Transcode a voice reference clip to 16-bit PCM mono WAV, preserving the
+    source sample rate and dynamics.
+
+    We deliberately do NOT apply loudness normalisation or downsampling here:
+    single-pass ffmpeg ``loudnorm`` dynamically compresses the audio (audible
+    pumping) and resampling to 22 kHz discards the top octave — both degrade the
+    timbre IndexTTS2 clones from. The model resamples the reference internally,
+    so the cleanest, highest-fidelity clip yields the best clone. We only force
+    mono (IndexTTS2 expects a mono reference) and a consistent WAV container.
+
+    Returns True on success.  Callers should fall back to saving raw_bytes if
+    this returns False (ffmpeg unavailable / non-fatal encoding error).
+    """
+    with tempfile.NamedTemporaryFile(suffix=".tmp", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+        tmp_path.write_bytes(raw_bytes)
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", str(tmp_path),
+                "-c:a", "pcm_s16le",
+                "-ac", "1",       # force mono — IndexTTS2 expects mono reference
+                str(dest),
+            ],
+            capture_output=True,
+            timeout=60,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+    finally:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -532,6 +582,47 @@ async def post_chapter_labels(
     return {"chapter_id": chapter_id, "lines": n, "status": "diarized"}
 
 
+_PROVIDER_ENV = {
+    "claude": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+}
+
+
+@app.post("/api/chapters/{chapter_id}/diarize-cloud")
+async def post_chapter_diarize_cloud(
+    chapter_id: int,
+    payload: CloudDiarizeRequest,
+    sm: StateManager = Depends(get_sm),
+):
+    """One-shot cloud diarization: export segments -> cloud LLM -> import labels.
+
+    Provider is claude | openai | gemini. The API key comes from the request
+    (browser-stored) or, as a fallback, the matching server env var
+    (ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY). The key is used only
+    for this call and never persisted server-side."""
+    provider = (payload.provider or "claude").strip().lower()
+    env_var = _PROVIDER_ENV.get(provider, "ANTHROPIC_API_KEY")
+    api_key = (payload.api_key or "").strip() or os.environ.get(env_var, "")
+    try:
+        export_payload = dio.build_export(sm, chapter_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    try:
+        labels = dio.format_labels_via_cloud(
+            export_payload, provider=provider, api_key=api_key, model=payload.model)
+        n = dio.import_labels(sm, chapter_id, labels, force=payload.force)
+    except dio.ImportRejected as e:
+        msg = str(e)
+        if "past diarized" in msg:
+            raise HTTPException(status_code=409, detail=msg)
+        if "no chapter" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+    return {"chapter_id": chapter_id, "lines": n, "status": "diarized"}
+
+
 @app.delete("/api/chapters/{chapter_id}/audio")
 async def delete_chapter_audio(
     chapter_id: int,
@@ -631,9 +722,26 @@ async def upload_voice(
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
+    # A valid 3-second voice clip at 22050 Hz 16-bit mono is ~132 KB.
+    # Anything under 10 KB is a header or silence with no usable audio.
+    if len(content) < 10_000:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Voice clip is too short ({len(content):,} bytes). "
+                   "Upload at least 3-10 seconds of clean speech.",
+        )
+
     _VOICES_DIR.mkdir(parents=True, exist_ok=True)
-    dest = _VOICES_DIR / f"{slug}{ext}"
-    dest.write_bytes(content)
+
+    # Transcode to mono 16-bit WAV (preserving sample rate + dynamics) so every
+    # clip is a clean, consistent container for IndexTTS2 to clone from.
+    dest = _VOICES_DIR / f"{slug}.wav"
+    normalized = _normalize_voice_clip(content, dest)
+    if not normalized:
+        # FFmpeg unavailable or failed — save the raw file and carry on.
+        dest = _VOICES_DIR / f"{slug}{ext}"
+        dest.write_bytes(content)
+
     sm.set_voice(speaker, str(dest))
     return {"speaker": speaker, "ref_audio_path": str(dest)}
 

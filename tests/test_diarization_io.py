@@ -3,6 +3,7 @@ Test suite for external diarization import (diarization_io.py).
 Run: python tests/test_diarization_io.py
 No GPU / no model required.
 """
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -208,6 +209,148 @@ def test_import_clobber_guard():
     print("  PASS test_import_clobber_guard")
 
 
+# ── T5: format_labels_via_claude (cloud formatter) ──────────────────────────
+
+class _FakeContentBlock:
+    def __init__(self, text): self.text = text
+
+
+class _FakeResponse:
+    def __init__(self, text): self.content = [_FakeContentBlock(text)]
+
+
+def _install_fake_anthropic(reply_text, capture=None):
+    """Put a fake `anthropic` module in sys.modules; returns nothing.
+
+    `capture` (optional dict) records the create() kwargs for assertions.
+    """
+    import types
+    mod = types.ModuleType("anthropic")
+
+    class _Messages:
+        def create(self, **kwargs):
+            if capture is not None:
+                capture.update(kwargs)
+            return _FakeResponse(reply_text)
+
+    class _Anthropic:
+        def __init__(self, api_key=None): self.messages = _Messages()
+
+    mod.Anthropic = _Anthropic
+    sys.modules["anthropic"] = mod
+
+
+def _payload_one_chapter(sm):
+    _, ch_id = _seed_chapter(sm, ['"We move at dawn." Nephis turned away.'])
+    return ch_id, dio.build_export(sm, ch_id)
+
+
+def test_format_cloud_empty_key_rejected():
+    sm = _tmp_sm()
+    _, payload = _payload_one_chapter(sm)
+    try:
+        dio.format_labels_via_claude(payload, api_key="   ")
+        assert False, "expected rejection on empty key"
+    except dio.ImportRejected as e:
+        assert "key" in str(e).lower()
+    print("  PASS test_format_cloud_empty_key_rejected")
+
+
+def test_format_cloud_parses_labels_and_sends_prompt():
+    sm = _tmp_sm()
+    ch_id, payload = _payload_one_chapter(sm)
+    n = len(payload["segments"])
+    labels = {"labels": [{"i": i, "speaker": "Narrator", "emotion": "neutral"}
+                         for i in range(n)]}
+    cap = {}
+    _install_fake_anthropic("Here:\n" + json.dumps(labels) + "\ndone", capture=cap)
+
+    out = dio.format_labels_via_claude(payload, api_key="sk-ant-x", model="claude-opus-4-8")
+    assert out["labels"] == labels["labels"], "should extract the JSON object"
+    # the user message carries the `i [KIND] text` segment lines, not raw chapter text
+    sent = cap["messages"][0]["content"]
+    assert all(f"{s['i']} [" in sent for s in payload["segments"])
+    assert "Narrator" in cap["system"] and "labels" in cap["system"]
+    # and the extracted labels import cleanly
+    imported = dio.import_labels(sm, ch_id, out)
+    assert imported == n and sm.get_chapter_by_id(ch_id)["status"] == "diarized"
+    print("  PASS test_format_cloud_parses_labels_and_sends_prompt")
+
+
+def test_format_cloud_bad_json_rejected():
+    sm = _tmp_sm()
+    _, payload = _payload_one_chapter(sm)
+    _install_fake_anthropic("the model rambled with no json at all")
+    try:
+        dio.format_labels_via_claude(payload, api_key="sk-ant-x")
+        assert False, "expected rejection on non-JSON output"
+    except dio.ImportRejected as e:
+        assert "json" in str(e).lower()
+    finally:
+        sys.modules.pop("anthropic", None)
+    print("  PASS test_format_cloud_bad_json_rejected")
+
+
+def _install_fake_openai(reply_text, capture=None):
+    """Put a fake `openai` module in sys.modules (OpenAI().chat.completions.create)."""
+    import types
+    mod = types.ModuleType("openai")
+
+    class _Msg:
+        def __init__(self, content): self.message = types.SimpleNamespace(content=content)
+
+    class _Resp:
+        def __init__(self, text): self.choices = [_Msg(text)]
+
+    class _Completions:
+        def create(self, **kwargs):
+            if capture is not None:
+                capture.update(kwargs)
+            return _Resp(reply_text)
+
+    class _OpenAI:
+        def __init__(self, api_key=None):
+            self.chat = types.SimpleNamespace(completions = _Completions())
+
+    mod.OpenAI = _OpenAI
+    sys.modules["openai"] = mod
+
+
+def test_format_cloud_openai_provider():
+    sm = _tmp_sm()
+    ch_id, payload = _payload_one_chapter(sm)
+    n = len(payload["segments"])
+    labels = {"labels": [{"i": i, "speaker": "Narrator", "emotion": "neutral"}
+                         for i in range(n)]}
+    cap = {}
+    _install_fake_openai(json.dumps(labels), capture=cap)
+    try:
+        out = dio.format_labels_via_cloud(payload, provider="openai",
+                                          api_key="sk-x", model="gpt-4o")
+        assert out["labels"] == labels["labels"]
+        assert cap["model"] == "gpt-4o"
+        # system + user roles both sent to the chat-completions API
+        roles = [m["role"] for m in cap["messages"]]
+        assert roles == ["system", "user"]
+        assert all(f"{s['i']} [" in cap["messages"][1]["content"] for s in payload["segments"])
+        dio.import_labels(sm, ch_id, out)
+        assert sm.get_chapter_by_id(ch_id)["status"] == "diarized"
+    finally:
+        sys.modules.pop("openai", None)
+    print("  PASS test_format_cloud_openai_provider")
+
+
+def test_format_cloud_unknown_provider_rejected():
+    sm = _tmp_sm()
+    _, payload = _payload_one_chapter(sm)
+    try:
+        dio.format_labels_via_cloud(payload, provider="llama", api_key="x")
+        assert False, "expected rejection on unknown provider"
+    except dio.ImportRejected as e:
+        assert "provider" in str(e).lower()
+    print("  PASS test_format_cloud_unknown_provider_rejected")
+
+
 TESTS = [
     test_segment_chapter_global_indices,
     test_build_export_payload,
@@ -219,6 +362,11 @@ TESTS = [
     test_import_index_gap_rejected,
     test_import_repairs_bad_speaker_and_emotion,
     test_import_clobber_guard,
+    test_format_cloud_empty_key_rejected,
+    test_format_cloud_parses_labels_and_sends_prompt,
+    test_format_cloud_bad_json_rejected,
+    test_format_cloud_openai_provider,
+    test_format_cloud_unknown_provider_rejected,
 ]
 
 

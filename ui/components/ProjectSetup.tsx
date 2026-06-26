@@ -11,6 +11,7 @@ interface Props {
   onCreated: (
     project: Project, progress: Progress,
     llmPath: string, ttsDir: string, speakers: string[], options: GenOptions,
+    epubPath: string,
   ) => void
 }
 
@@ -27,7 +28,9 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 }
 
 export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, initialSpeakers, onCreated }: Props) {
-  const [epubPath, setEpubPath] = useState(initialEpub)
+  // epub: "remembered" uses the last-saved path; "new" shows an editable input
+  const [epubMode,    setEpubMode]    = useState<'remembered' | 'new'>(initialEpub ? 'remembered' : 'new')
+  const [newEpubPath, setNewEpubPath] = useState('')
   const [llmPath,  setLlmPath]  = useState(initialLlm)
   const [ttsDir,   setTtsDir]   = useState(initialTtsDir)
   const [speakers, setSpeakers] = useState(initialSpeakers)
@@ -38,10 +41,15 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState<string | null>(null)
 
-  useEffect(() => { setEpubPath(initialEpub) },     [initialEpub])
+  // When the parent loads a remembered epub from localStorage, switch to remembered mode
+  // (only if the user hasn't already typed something in the new-path input)
+  useEffect(() => { if (initialEpub && !newEpubPath) setEpubMode('remembered') }, [initialEpub])
   useEffect(() => { setLlmPath(initialLlm) },       [initialLlm])
   useEffect(() => { setTtsDir(initialTtsDir) },     [initialTtsDir])
   useEffect(() => { setSpeakers(initialSpeakers) }, [initialSpeakers])
+
+  const effectiveEpub = epubMode === 'remembered' ? initialEpub : newEpubPath
+  const epubFilename  = initialEpub.split(/[\\/]/).pop() ?? initialEpub
 
   /** Build the 0-based [start, end] chapter_index range from the 1-based form inputs. */
   function resolveChapterRange(): [number, number] | null {
@@ -58,15 +66,17 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault(); setError(null); setLoading(true)
     try {
+      const epub = effectiveEpub.trim()
+      if (!epub) { setError('EPUB path is required'); setLoading(false); return }
       const speakerList = speakers.split(',').map(s => s.trim()).filter(Boolean)
       const chapterRange = resolveChapterRange()   // throws on invalid input → caught below
       const result = await createProject({
-        epub_path: epubPath.trim(), llm_model_path: llmPath.trim(),
+        epub_path: epub, llm_model_path: llmPath.trim(),
         tts_model_dir: ttsDir.trim(), speakers: speakerList,
       })
       onCreated(result.project, result.progress, llmPath.trim(), ttsDir.trim(), speakerList, {
         chapterRange, outputFormat, vramCheck,
-      })
+      }, epub)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally { setLoading(false) }
@@ -83,16 +93,46 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
         <div className="flex-1 weaver-thread" />
       </div>
 
-      {/* Source EPUB */}
+      {/* Source EPUB — shows remembered path by default; "Change" to enter a new one */}
       <Field label="EPUB Path">
-        <input
-          className="input"
-          placeholder="data/input/shadow_slave.epub"
-          value={epubPath}
-          onChange={e => setEpubPath(e.target.value)}
-          required
-          spellCheck={false}
-        />
+        {epubMode === 'remembered' ? (
+          <div className="flex items-center gap-2">
+            <div
+              className="input flex-1 text-ink-ghost truncate cursor-default select-none"
+              title={initialEpub}
+            >
+              {epubFilename}
+            </div>
+            <button
+              type="button"
+              className="text-[11px] text-ink-ghost hover:text-ink-primary underline shrink-0"
+              onClick={() => { setEpubMode('new'); setNewEpubPath('') }}
+            >
+              Change
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <input
+              className="input"
+              placeholder="data/input/shadow_slave.epub"
+              value={newEpubPath}
+              onChange={e => setNewEpubPath(e.target.value)}
+              required
+              spellCheck={false}
+              autoFocus={Boolean(initialEpub)}
+            />
+            {initialEpub && (
+              <button
+                type="button"
+                className="text-[11px] text-ink-ghost hover:text-ink-primary underline"
+                onClick={() => setEpubMode('remembered')}
+              >
+                ← Use remembered: {epubFilename}
+              </button>
+            )}
+          </div>
+        )}
       </Field>
 
       <div className="divider" />

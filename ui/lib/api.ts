@@ -150,6 +150,26 @@ export async function importChapterLabels(
   })
 }
 
+export type DiarizeProvider = 'claude' | 'openai' | 'gemini'
+
+/** One-click cloud diarization: server exports segments, calls the chosen cloud
+ *  LLM (claude/openai/gemini), and imports the labels → status 'diarized'.
+ *  `apiKey` is sent per request and never persisted server-side. */
+export async function diarizeChapterCloud(
+  chapterId: number,
+  params: { provider: DiarizeProvider; apiKey: string; model?: string; force?: boolean },
+): Promise<{ chapter_id: number; lines: number; status: string }> {
+  return req(`/chapters/${chapterId}/diarize-cloud`, {
+    method: 'POST',
+    body: JSON.stringify({
+      provider: params.provider,
+      api_key: params.apiKey,
+      model: params.model,
+      force: params.force ?? false,
+    }),
+  })
+}
+
 export async function resetChapters(params: {
   project_id: number
   status_filter?: string[] | null

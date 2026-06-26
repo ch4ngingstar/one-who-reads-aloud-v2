@@ -187,9 +187,9 @@ export default function LiveLog({ events, open, onToggle, onClear, embedded = fa
               shown.map((e, i) => {
                 const [icon, colorClass] = EV_STYLE[e.type] ?? ['·', 'text-ink-ghost']
                 return (
-                  <div key={i} className={`whitespace-pre flex gap-2 ${colorClass}`}>
+                  <div key={i} className={`flex gap-2 min-w-0 ${colorClass}`}>
                     <span className="flex-shrink-0 w-3 text-center opacity-40 select-none">{icon}</span>
-                    <span>{formatEvent(e)}</span>
+                    <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{formatEvent(e)}</span>
                   </div>
                 )
               })

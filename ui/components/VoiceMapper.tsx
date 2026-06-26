@@ -77,6 +77,10 @@ export default function VoiceMapper({ voices, onUpdate }: { voices: Voice[]; onU
   const [newSpeaker,    setNewSpeaker]    = useState('')
   const [extraSpeakers, setExtraSpeakers] = useState<string[]>([])
   const [previewing,    setPreviewing]    = useState<string | null>(null)
+  // Track upload timestamps per speaker so the preview URL busts the browser
+  // audio cache after a new clip is uploaded (URL doesn't change, content does).
+  const [voiceVersions,   setVoiceVersions]   = useState<Record<string, number>>({})
+  const [successSpeakers, setSuccessSpeakers] = useState<Set<string>>(new Set())
   const previewRef = useRef<HTMLAudioElement | null>(null)
 
   // One shared element — starting a preview stops whichever clip was playing.
@@ -90,7 +94,11 @@ export default function VoiceMapper({ voices, onUpdate }: { voices: Voice[]; onU
       return
     }
     previewRef.current?.pause()
-    const audio = new Audio(voiceAudioUrl(speaker))
+    // Append version timestamp so the browser doesn't play a cached old clip
+    // after the user uploads a replacement for the same speaker.
+    const version = voiceVersions[speaker]
+    const url = voiceAudioUrl(speaker) + (version ? `?v=${version}` : '')
+    const audio = new Audio(url)
     audio.onended = () => setPreviewing(p => (p === speaker ? null : p))
     audio.onerror = () => {
       setPreviewing(p => (p === speaker ? null : p))
@@ -109,10 +117,21 @@ export default function VoiceMapper({ voices, onUpdate }: { voices: Voice[]; onU
     const input  = document.createElement('input')
     input.type   = 'file'
     input.accept = '.wav,.mp3,.flac'
+    // Append to DOM — some browsers won't fire onchange on a detached element.
+    input.style.display = 'none'
+    document.body.appendChild(input)
     input.onchange = async () => {
+      document.body.removeChild(input)
       const file = input.files?.[0]; if (!file) return
       setUploading(speaker); setError(null)
-      try { await uploadVoice(speaker, file); onUpdate() }
+      try {
+        await uploadVoice(speaker, file)
+        const ts = Date.now()
+        setVoiceVersions(prev => ({ ...prev, [speaker]: ts }))
+        setSuccessSpeakers(prev => { const s = new Set(prev); s.add(speaker); return s })
+        setTimeout(() => setSuccessSpeakers(prev => { const s = new Set(prev); s.delete(speaker); return s }), 2500)
+        onUpdate()
+      }
       catch (err) { setError(err instanceof Error ? err.message : 'Upload failed') }
       finally { setUploading(null) }
     }
@@ -207,14 +226,20 @@ export default function VoiceMapper({ voices, onUpdate }: { voices: Voice[]; onU
                     </button>
                   )}
                   <button
-                    className="btn text-[10px] py-1 px-2.5 gap-1.5"
+                    className={`btn text-[10px] py-1 px-2.5 gap-1.5 transition-colors duration-300 ${
+                      successSpeakers.has(speaker) ? '!text-emerald-400 !border-emerald-700' : ''
+                    }`}
                     onClick={() => pickFile(speaker)}
                     disabled={isUploading}
                     title={voice ? 'Replace voice file' : 'Upload voice file'}
                   >
-                    {isUploading ? '…' : voice
-                      ? <><DataSync size={11} /><span>SYNC</span></>
-                      : <><UploadArrow size={11} /><span>LOAD</span></>
+                    {isUploading
+                      ? '…'
+                      : successSpeakers.has(speaker)
+                        ? <span className="text-emerald-400">✓ SAVED</span>
+                        : voice
+                          ? <><DataSync size={11} /><span>SYNC</span></>
+                          : <><UploadArrow size={11} /><span>LOAD</span></>
                     }
                   </button>
                   {voice && (

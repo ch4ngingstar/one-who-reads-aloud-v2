@@ -8,6 +8,8 @@ from the stored EPUB chunks via segment_chunk(). GPU-free, no llama_cpp import.
 """
 from __future__ import annotations
 
+import json
+
 from segmenter import segment_chunk
 from llm_director import (
     enforce_labels, _allowed_speakers, _build_system_prompt,
@@ -78,6 +80,133 @@ _OVERWRITABLE = {"pending", "diarized", "error"}
 
 class ImportRejected(Exception):
     """Raised when an external label file is invalid or unsafe to apply."""
+
+
+def _segments_to_user_msg(segments: "list[dict]") -> str:
+    """Render export segments as the `i [KIND] text` lines the prompt expects."""
+    return "\n".join(
+        f"{s['i']} [{s['kind'][0].upper()}] {s['text']}" for s in segments
+    )
+
+
+# Cloud diarization providers. Models are sensible *defaults* only -- the caller
+# (UI / CLI) may override with any model id the provider exposes.
+CLOUD_PROVIDERS = ("claude", "openai", "gemini")
+_DEFAULT_MODELS = {
+    "claude": "claude-opus-4-8",
+    "openai": "gpt-4o",
+    "gemini": "gemini-1.5-pro",
+}
+
+
+def _call_claude(system: str, user: str, *, api_key: str, model: str, max_tokens: int) -> str:
+    try:
+        import anthropic
+    except ImportError:
+        raise ImportRejected(
+            "the 'anthropic' package is not installed on the server (`pip install anthropic`)")
+    client = anthropic.Anthropic(api_key=api_key)
+    resp = client.messages.create(
+        model=model, max_tokens=max_tokens, system=system,
+        messages=[{"role": "user", "content": user}],
+    )
+    return resp.content[0].text if resp.content else ""
+
+
+def _call_openai(system: str, user: str, *, api_key: str, model: str, max_tokens: int) -> str:
+    try:
+        import openai
+    except ImportError:
+        raise ImportRejected(
+            "the 'openai' package is not installed on the server (`pip install openai`)")
+    client = openai.OpenAI(api_key=api_key)
+    resp = client.chat.completions.create(
+        model=model, max_tokens=max_tokens,
+        messages=[{"role": "system", "content": system},
+                  {"role": "user", "content": user}],
+    )
+    return resp.choices[0].message.content or ""
+
+
+def _call_gemini(system: str, user: str, *, api_key: str, model: str, max_tokens: int) -> str:
+    try:
+        import google.generativeai as genai
+    except ImportError:
+        raise ImportRejected(
+            "the 'google-generativeai' package is not installed on the server "
+            "(`pip install google-generativeai`)")
+    genai.configure(api_key=api_key)
+    gen = genai.GenerativeModel(model_name=model, system_instruction=system)
+    resp = gen.generate_content(user, generation_config={"max_output_tokens": max_tokens})
+    return resp.text or ""
+
+
+_PROVIDER_CALLS = {"claude": _call_claude, "openai": _call_openai, "gemini": _call_gemini}
+
+
+def _parse_labels(text: str) -> dict:
+    """Extract the {"labels": [...]} object from a model's raw text response."""
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise ImportRejected("model did not return a JSON labels object")
+    try:
+        labels = json.loads(text[start:end + 1])
+    except json.JSONDecodeError as e:
+        raise ImportRejected(f"could not parse labels JSON: {e}")
+    if not isinstance(labels, dict) or "labels" not in labels:
+        raise ImportRejected("model output missing 'labels' array")
+    return labels
+
+
+def format_labels_via_cloud(export_payload: dict, *, provider: str = "claude",
+                            api_key: str, model: "str | None" = None,
+                            max_tokens: int = 8192,
+                            speakers: "list[str] | None" = None) -> dict:
+    """Diarize one chapter's exported segments via a cloud LLM.
+
+    `provider` is one of CLOUD_PROVIDERS (claude / openai / gemini). `model`
+    overrides the provider default. Returns ``{"labels": [...]}`` ready for
+    ``import_labels``. GPU-free; no network unless called. The model only ever
+    sees the segments it labels -- on import the text is re-derived from the EPUB.
+
+    Raises ImportRejected (mapped to a 4xx by the API) for an unknown provider,
+    a missing key, a missing provider SDK, a failed request, or output that can
+    not be parsed as the labels JSON object.
+    """
+    provider = (provider or "claude").strip().lower()
+    if provider not in _PROVIDER_CALLS:
+        raise ImportRejected(
+            f"unknown provider '{provider}' (use one of: {', '.join(CLOUD_PROVIDERS)})")
+    if not api_key or not api_key.strip():
+        raise ImportRejected("no API key provided")
+
+    segments = export_payload.get("segments", [])
+    if not segments:
+        raise ImportRejected("export payload has no segments to label")
+
+    model = (model or "").strip() or _DEFAULT_MODELS[provider]
+    system = build_system_prompt_text(speakers)
+    user = _segments_to_user_msg(segments)
+
+    try:
+        text = _PROVIDER_CALLS[provider](
+            system, user, api_key=api_key.strip(), model=model, max_tokens=max_tokens)
+    except ImportRejected:
+        raise
+    except Exception as e:  # auth / network / SDK errors -- surface cleanly
+        raise ImportRejected(f"{provider} request failed: {e}")
+
+    return _parse_labels(text)
+
+
+def format_labels_via_claude(export_payload: dict, *, api_key: str,
+                             model: str = "claude-opus-4-8",
+                             max_tokens: int = 8192,
+                             speakers: "list[str] | None" = None) -> dict:
+    """Back-compat shim for the CLI/tests: Claude-only cloud diarization."""
+    return format_labels_via_cloud(
+        export_payload, provider="claude", api_key=api_key, model=model,
+        max_tokens=max_tokens, speakers=speakers)
 
 
 def validate_labels(payload: dict, segments: "list[dict]") -> "dict[int, tuple[str, str]]":
