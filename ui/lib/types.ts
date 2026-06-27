@@ -42,6 +42,8 @@ export interface GenOptions {
   chapterRange: [number, number] | null
   outputFormat: string
   vramCheck: boolean
+  /** Layer reviewed ambience/sfx/music cues under the voice at assembly time. */
+  sfxEnabled: boolean
 }
 
 export interface Voice {

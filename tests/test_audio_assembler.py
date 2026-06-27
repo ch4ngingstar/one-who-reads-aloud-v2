@@ -438,8 +438,12 @@ def test_sfx_enabled_routes_through_sound_designer():
         ])
 
         # Capture the FFmpeg commands SoundDesigner would run; write the output.
+        # NB: grab the staticmethod DESCRIPTOR (via __dict__) so the restore below
+        # re-installs it as a staticmethod. Plain ``SoundDesigner._run`` unwraps to
+        # the bare function; restoring that would make later ``self._run(cmd)``
+        # calls pass an extra positional arg and break every subsequent real run.
         calls = []
-        orig_run = sound_designer.SoundDesigner._run
+        orig_run = sound_designer.SoundDesigner.__dict__["_run"]
         def fake_sd_run(cmd):
             calls.append(cmd)
             Path(cmd[-1]).write_bytes(b"X" * 5000)

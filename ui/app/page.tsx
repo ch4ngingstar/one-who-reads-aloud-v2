@@ -19,7 +19,7 @@ const STORAGE_KEY = 'pipeline_cfg'
 interface SavedConfig {
   projectName: string; llmPath: string
   ttsDir: string; epubPath: string; speakers: string
-  outputFormat?: string; vramCheck?: boolean
+  outputFormat?: string; vramCheck?: boolean; sfxEnabled?: boolean
   fishDir?: string  // legacy key — migrated to ttsDir on load
 }
 
@@ -39,6 +39,7 @@ export default function CommandDeck() {
   const [speakers,     setSpeakers]     = useState('Sunny, Nephis, Cassie, Effie, Kai')
   const [outputFormat, setOutputFormat] = useState('mp3')
   const [vramCheck,    setVramCheck]    = useState(true)
+  const [sfxEnabled,   setSfxEnabled]   = useState(false)
 
   const [playingChId,   setPlayingChId]   = useState<number | null>(null)
   const [playerPlaying, setPlayerPlaying] = useState(false)
@@ -114,6 +115,7 @@ export default function CommandDeck() {
     if (cfg.speakers) setSpeakers(cfg.speakers)
     if (cfg.outputFormat) setOutputFormat(cfg.outputFormat)
     if (cfg.vramCheck != null) setVramCheck(cfg.vramCheck)
+    if (cfg.sfxEnabled != null) setSfxEnabled(cfg.sfxEnabled)
     if (cfg.projectName) {
       getProject(cfg.projectName)
         .then(({ project: p, progress: pr }) => {
@@ -141,7 +143,7 @@ export default function CommandDeck() {
     return {
       llm_model_path: llmPath, tts_model_dir: ttsDir,
       speakers: speakerList, output_format: outputFormat,
-      vram_check_enabled: vramCheck,
+      vram_check_enabled: vramCheck, sfx_enabled: sfxEnabled,
     }
   }
 
@@ -167,17 +169,17 @@ export default function CommandDeck() {
     setProject(p); setProgress(prog); setLlmPath(llm); setTtsDir(tts)
     setEpubPath(epub)
     setSpeakers(spkList.join(', ')); setOutputFormat(opts.outputFormat)
-    setVramCheck(opts.vramCheck); setSideTab('voices')
+    setVramCheck(opts.vramCheck); setSfxEnabled(opts.sfxEnabled); setSideTab('voices')
     saveCfg({
       projectName: p.name, llmPath: llm, ttsDir: tts, epubPath: epub,
       speakers: spkList.join(', '),
-      outputFormat: opts.outputFormat, vramCheck: opts.vramCheck,
+      outputFormat: opts.outputFormat, vramCheck: opts.vramCheck, sfxEnabled: opts.sfxEnabled,
     })
     fetchChapters(p)
     startPipeline({
       project_name: p.name, llm_model_path: llm, tts_model_dir: tts, speakers: spkList,
       chapter_range: opts.chapterRange, output_format: opts.outputFormat,
-      vram_check_enabled: opts.vramCheck,
+      vram_check_enabled: opts.vramCheck, sfx_enabled: opts.sfxEnabled,
     })
       .then(() => { dispatch({ kind: 'set-status', status: 'running' }); setSideTab('inspector') })
       .catch(err => {

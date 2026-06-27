@@ -38,6 +38,7 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
   const [rangeEnd,   setRangeEnd]   = useState('')
   const [outputFormat, setOutputFormat] = useState<string>('mp3')
   const [vramCheck,    setVramCheck]    = useState(true)
+  const [sfxEnabled,   setSfxEnabled]   = useState(false)
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState<string | null>(null)
 
@@ -75,7 +76,7 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
         tts_model_dir: ttsDir.trim(), speakers: speakerList,
       })
       onCreated(result.project, result.progress, llmPath.trim(), ttsDir.trim(), speakerList, {
-        chapterRange, outputFormat, vramCheck,
+        chapterRange, outputFormat, vramCheck, sfxEnabled,
       }, epub)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
@@ -236,6 +237,19 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
           className="w-3.5 h-3.5 accent-[#FBBF24] cursor-pointer"
         />
         <span className="text-[11px] text-ink-secondary">VRAM barrier between LLM &amp; TTS</span>
+      </label>
+
+      {/* Sound design toggle */}
+      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={sfxEnabled}
+          onChange={e => setSfxEnabled(e.target.checked)}
+          className="w-3.5 h-3.5 accent-[#FBBF24] cursor-pointer"
+        />
+        <span className="text-[11px] text-ink-secondary">
+          Sound design — layer reviewed ambience &amp; sfx cues
+        </span>
       </label>
 
       {/* Error */}

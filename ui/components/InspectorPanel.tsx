@@ -4,17 +4,19 @@ import ConfirmButton from '@/components/ConfirmButton'
 import VoiceMapper from '@/components/VoiceMapper'
 import LiveLog from '@/components/LiveLog'
 import DiarizePanel from '@/components/DiarizePanel'
+import SoundDesignPanel from '@/components/SoundDesignPanel'
 import { deleteChapterAudio, getLines, resetChapter } from '@/lib/api'
 import { formatMB, parseChapterError } from '@/lib/format'
 import type { Chapter, Line, SSEEvent, Voice } from '@/lib/types'
 import type { LiveLine, Stage } from '@/hooks/usePipelineState'
 
-export type SideTab = 'inspector' | 'diarize' | 'voices' | 'forge' | 'log'
+export type SideTab = 'inspector' | 'diarize' | 'voices' | 'sound' | 'forge' | 'log'
 
 const TABS: { key: SideTab; label: string }[] = [
   { key: 'inspector', label: 'Inspector' },
   { key: 'diarize',   label: 'Diarize' },
   { key: 'voices',    label: 'Voices' },
+  { key: 'sound',     label: 'Sound' },
   { key: 'forge',     label: 'Forge' },
   { key: 'log',       label: 'Log' },
 ]
@@ -255,6 +257,12 @@ export default function InspectorPanel({
       {tab === 'voices' && (
         <div className="flex-1 overflow-y-auto p-5">
           <VoiceMapper voices={voices} onUpdate={onVoicesUpdate} />
+        </div>
+      )}
+
+      {tab === 'sound' && (
+        <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          <SoundDesignPanel chapter={selectedChapter} onChanged={onChanged} />
         </div>
       )}
 
