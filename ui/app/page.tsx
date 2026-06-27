@@ -12,7 +12,8 @@ import InspectorPanel, { type SideTab } from '@/components/InspectorPanel'
 import ProjectSetup   from '@/components/ProjectSetup'
 import PlayerBar      from '@/components/PlayerBar'
 import Toasts         from '@/components/Toasts'
-import type { Project, Progress, Chapter, Voice, GenOptions } from '@/lib/types'
+import type { Project, Progress, Chapter, Voice, GenOptions, SfxCategory } from '@/lib/types'
+import { SFX_CATEGORIES } from '@/lib/sfxCatalog'
 
 const STORAGE_KEY = 'pipeline_cfg'
 
@@ -20,6 +21,7 @@ interface SavedConfig {
   projectName: string; llmPath: string
   ttsDir: string; epubPath: string; speakers: string
   outputFormat?: string; vramCheck?: boolean; sfxEnabled?: boolean
+  sfxCategories?: SfxCategory[]
   fishDir?: string  // legacy key — migrated to ttsDir on load
 }
 
@@ -40,6 +42,7 @@ export default function CommandDeck() {
   const [outputFormat, setOutputFormat] = useState('mp3')
   const [vramCheck,    setVramCheck]    = useState(true)
   const [sfxEnabled,   setSfxEnabled]   = useState(false)
+  const [sfxCategories, setSfxCategories] = useState<SfxCategory[]>([...SFX_CATEGORIES])
 
   const [playingChId,   setPlayingChId]   = useState<number | null>(null)
   const [playerPlaying, setPlayerPlaying] = useState(false)
@@ -116,6 +119,7 @@ export default function CommandDeck() {
     if (cfg.outputFormat) setOutputFormat(cfg.outputFormat)
     if (cfg.vramCheck != null) setVramCheck(cfg.vramCheck)
     if (cfg.sfxEnabled != null) setSfxEnabled(cfg.sfxEnabled)
+    if (cfg.sfxCategories != null) setSfxCategories(cfg.sfxCategories)
     if (cfg.projectName) {
       getProject(cfg.projectName)
         .then(({ project: p, progress: pr }) => {
@@ -144,6 +148,7 @@ export default function CommandDeck() {
       llm_model_path: llmPath, tts_model_dir: ttsDir,
       speakers: speakerList, output_format: outputFormat,
       vram_check_enabled: vramCheck, sfx_enabled: sfxEnabled,
+      sfx_categories: sfxCategories,
     }
   }
 
@@ -169,17 +174,20 @@ export default function CommandDeck() {
     setProject(p); setProgress(prog); setLlmPath(llm); setTtsDir(tts)
     setEpubPath(epub)
     setSpeakers(spkList.join(', ')); setOutputFormat(opts.outputFormat)
-    setVramCheck(opts.vramCheck); setSfxEnabled(opts.sfxEnabled); setSideTab('voices')
+    setVramCheck(opts.vramCheck); setSfxEnabled(opts.sfxEnabled)
+    setSfxCategories(opts.sfxCategories); setSideTab('voices')
     saveCfg({
       projectName: p.name, llmPath: llm, ttsDir: tts, epubPath: epub,
       speakers: spkList.join(', '),
-      outputFormat: opts.outputFormat, vramCheck: opts.vramCheck, sfxEnabled: opts.sfxEnabled,
+      outputFormat: opts.outputFormat, vramCheck: opts.vramCheck,
+      sfxEnabled: opts.sfxEnabled, sfxCategories: opts.sfxCategories,
     })
     fetchChapters(p)
     startPipeline({
       project_name: p.name, llm_model_path: llm, tts_model_dir: tts, speakers: spkList,
       chapter_range: opts.chapterRange, output_format: opts.outputFormat,
       vram_check_enabled: opts.vramCheck, sfx_enabled: opts.sfxEnabled,
+      sfx_categories: opts.sfxCategories,
     })
       .then(() => { dispatch({ kind: 'set-status', status: 'running' }); setSideTab('inspector') })
       .catch(err => {

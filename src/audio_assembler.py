@@ -39,6 +39,11 @@ def _concat_entry(p: Path) -> str:
     return "file '{}'".format(p.as_posix().replace("'", r"'\''"))
 
 
+# Cue types stored in the DB map onto the three sound-design categories the user
+# can enable/disable independently. (A "scene" cue lays an ambience bed.)
+_CUE_TYPE_TO_CATEGORY = {"scene": "ambience", "sfx": "sfx", "music": "music"}
+
+
 # ── Config defaults ───────────────────────────────────────────────────────────
 _DEFAULT_CFG = {
     "inter_line_silence_ms":    200,   # gap between lines, same speaker
@@ -49,7 +54,9 @@ _DEFAULT_CFG = {
     "output_channels":          1,     # mono — smaller files, standard for audiobooks
     "min_completion_ratio":     0.5,   # abort if fewer than 50% of lines are tts_done
     # ── Sound design (opt-in; off => behaviour identical to before) ──
-    "sfx_enabled":              False, # layer ambience/sfx/music when cues exist
+    "sfx_enabled":              False, # master switch — layer sound when cues exist
+    # Which of the three layers to render when enabled. Empty => nothing (off).
+    "sfx_categories":           ["ambience", "sfx", "music"],
     "sfx_dir":                  "data/sfx",
     "sfx_channels":             2,     # cinematic mix is stereo (beds need width)
 }
@@ -145,10 +152,16 @@ class AudioAssembler:
             list_content = self._build_concat_list(tts_done, silence_paths)
             list_path.write_text(list_content, encoding="utf-8")
 
-            cues = (
-                self.sm.get_cues_for_chapter(chapter_id)
-                if self.cfg.get("sfx_enabled") else []
-            )
+            # Master switch + per-category whitelist. A cue only survives if its
+            # category is enabled; empty whitelist => no cues => default path.
+            if self.cfg.get("sfx_enabled"):
+                enabled = set(self.cfg.get("sfx_categories") or [])
+                cues = [
+                    c for c in self.sm.get_cues_for_chapter(chapter_id)
+                    if _CUE_TYPE_TO_CATEGORY.get(c["cue_type"]) in enabled
+                ]
+            else:
+                cues = []
             if cues:
                 # Sound-design path: concat -> lossless voice bus, then mix
                 # ambience/sfx/music under it (CPU-only, additive, never fatal).

@@ -65,6 +65,7 @@ export async function startPipeline(params: {
   output_format?: string
   vram_check_enabled?: boolean
   sfx_enabled?: boolean
+  sfx_categories?: string[]
 }): Promise<{ status: string }> {
   return req('/pipeline/start', { method: 'POST', body: JSON.stringify(params) })
 }

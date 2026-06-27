@@ -95,7 +95,7 @@ CLOUD_PROVIDERS = ("claude", "openai", "gemini")
 _DEFAULT_MODELS = {
     "claude": "claude-opus-4-8",
     "openai": "gpt-4o",
-    "gemini": "gemini-1.5-pro",
+    "gemini": "gemini-2.5-flash",
 }
 
 
@@ -129,15 +129,25 @@ def _call_openai(system: str, user: str, *, api_key: str, model: str, max_tokens
 
 
 def _call_gemini(system: str, user: str, *, api_key: str, model: str, max_tokens: int) -> str:
+    # Requires google-genai (new SDK). The old google-generativeai package is
+    # deprecated and rejects gemini-2.5+ models. v1beta is correct here —
+    # systemInstruction is not supported in v1, and preview models live on v1beta.
     try:
-        import google.generativeai as genai
+        from google import genai
+        from google.genai import types as genai_types
     except ImportError:
         raise ImportRejected(
-            "the 'google-generativeai' package is not installed on the server "
-            "(`pip install google-generativeai`)")
-    genai.configure(api_key=api_key)
-    gen = genai.GenerativeModel(model_name=model, system_instruction=system)
-    resp = gen.generate_content(user, generation_config={"max_output_tokens": max_tokens})
+            "the 'google-genai' package is not installed on the server "
+            "(`pip install google-genai`)")
+    client = genai.Client(api_key=api_key)
+    resp = client.models.generate_content(
+        model=model,
+        contents=user,
+        config=genai_types.GenerateContentConfig(
+            system_instruction=system,
+            max_output_tokens=max_tokens,
+        ),
+    )
     return resp.text or ""
 
 

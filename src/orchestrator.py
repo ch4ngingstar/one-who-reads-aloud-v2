@@ -118,6 +118,8 @@ class PipelineConfig:
     # Sound design (opt-in, CPU-only): layer ambience/sfx/music under the voice
     # when a chapter has cues. Off => assembly is identical to before.
     sfx_enabled:          bool = False
+    # Which layers to render when enabled. Empty => off. Defaults to all three.
+    sfx_categories:       list = field(default_factory=lambda: ["ambience", "sfx", "music"])
     sfx_dir:              str  = "data/sfx"
 
     # Behaviour
@@ -506,6 +508,7 @@ class PipelineOrchestrator:
                 "output_format":        self.cfg.output_format,
                 "min_completion_ratio": self.cfg.min_lines_threshold,
                 "sfx_enabled":          self.cfg.sfx_enabled,
+                "sfx_categories":       self.cfg.sfx_categories,
                 "sfx_dir":              self.cfg.sfx_dir,
             },
         )

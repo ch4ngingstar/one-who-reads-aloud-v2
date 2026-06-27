@@ -16,7 +16,7 @@ interface ProviderCfg {
 const PROVIDERS: ProviderCfg[] = [
   { id: 'claude', label: 'Claude · Anthropic', keyStore: 'anthropic_api_key', defaultModel: 'claude-opus-4-8', placeholder: 'sk-ant-…' },
   { id: 'openai', label: 'ChatGPT · OpenAI', keyStore: 'openai_api_key', defaultModel: 'gpt-4o', placeholder: 'sk-…' },
-  { id: 'gemini', label: 'Gemini · Google', keyStore: 'gemini_api_key', defaultModel: 'gemini-1.5-pro', placeholder: 'AIza…' },
+  { id: 'gemini', label: 'Gemini · Google', keyStore: 'gemini_api_key', defaultModel: 'gemini-2.5-flash', placeholder: 'AIza…' },
 ]
 const CFG = (id: DiarizeProvider) => PROVIDERS.find(p => p.id === id) ?? PROVIDERS[0]
 
@@ -63,7 +63,9 @@ export default function SoundDesignPanel({ chapter, onChanged }: {
   useEffect(() => {
     const cfg = CFG(provider)
     setApiKey(localStorage.getItem(cfg.keyStore) ?? '')
-    setModel(localStorage.getItem(`sd_model_${provider}`) ?? cfg.defaultModel)
+    let stored = localStorage.getItem(`sd_model_${provider}`) ?? cfg.defaultModel
+    if (stored === 'gemini-3.1-pro') stored = 'gemini-3.1-pro-preview'
+    setModel(stored)
   }, [provider])
 
   if (!chapter) {

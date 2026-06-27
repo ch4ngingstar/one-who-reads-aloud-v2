@@ -325,6 +325,52 @@ def test_pipeline_start_already_running():
     print("  PASS test_pipeline_start_already_running")
 
 
+def test_pipeline_start_sanitizes_sfx_categories():
+    """Unknown categories are dropped and canonical order is enforced."""
+    sm = _tmp_sm(); _seed_project(sm)
+    captured = {}
+
+    class FakeMgr:
+        status = "idle"
+        def start(self, config, sm_):
+            captured["config"] = config
+
+    client, _, _ = _make_client(sm=sm, mgr=FakeMgr())
+    r = client.post("/api/pipeline/start", json={
+        "project_name":   "shadow_slave",
+        "llm_model_path": "model.gguf",
+        "tts_model_dir":  "index-tts/checkpoints",
+        "sfx_enabled":    True,
+        "sfx_categories": ["music", "bogus", "ambience"],
+    })
+    assert r.status_code == 200
+    cfg = captured["config"]
+    assert cfg.sfx_enabled is True
+    assert cfg.sfx_categories == ["ambience", "music"]   # unknown dropped, ordered
+    print("  PASS test_pipeline_start_sanitizes_sfx_categories")
+
+
+def test_pipeline_start_defaults_sfx_categories():
+    """Omitting sfx_categories defaults to all three (backward compatible)."""
+    sm = _tmp_sm(); _seed_project(sm)
+    captured = {}
+
+    class FakeMgr:
+        status = "idle"
+        def start(self, config, sm_):
+            captured["config"] = config
+
+    client, _, _ = _make_client(sm=sm, mgr=FakeMgr())
+    r = client.post("/api/pipeline/start", json={
+        "project_name":   "shadow_slave",
+        "llm_model_path": "model.gguf",
+        "tts_model_dir":  "index-tts/checkpoints",
+    })
+    assert r.status_code == 200
+    assert captured["config"].sfx_categories == ["ambience", "sfx", "music"]
+    print("  PASS test_pipeline_start_defaults_sfx_categories")
+
+
 def test_pause_and_resume_endpoints():
     mgr = PipelineManager()
     mgr.status = "running"
@@ -730,6 +776,8 @@ TESTS = [
     test_pipeline_status_idle,
     test_pipeline_start_project_not_found,
     test_pipeline_start_already_running,
+    test_pipeline_start_sanitizes_sfx_categories,
+    test_pipeline_start_defaults_sfx_categories,
     test_pause_and_resume_endpoints,
     test_audio_not_found,
     test_audio_serves_file,

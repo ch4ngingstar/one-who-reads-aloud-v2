@@ -42,8 +42,10 @@ export interface GenOptions {
   chapterRange: [number, number] | null
   outputFormat: string
   vramCheck: boolean
-  /** Layer reviewed ambience/sfx/music cues under the voice at assembly time. */
+  /** Master switch — layer reviewed cues under the voice at assembly time. */
   sfxEnabled: boolean
+  /** Which of the three layers to render when enabled. Empty => none (off). */
+  sfxCategories: SfxCategory[]
 }
 
 export interface Voice {

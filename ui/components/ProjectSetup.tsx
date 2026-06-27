@@ -1,7 +1,8 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { createProject } from '@/lib/api'
-import type { Project, Progress, GenOptions } from '@/lib/types'
+import type { Project, Progress, GenOptions, SfxCategory } from '@/lib/types'
+import { SFX_CATEGORIES, CATEGORY_LABEL } from '@/lib/sfxCatalog'
 
 const OUTPUT_FORMATS = ['mp3', 'wav', 'flac', 'ogg'] as const
 
@@ -39,6 +40,7 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
   const [outputFormat, setOutputFormat] = useState<string>('mp3')
   const [vramCheck,    setVramCheck]    = useState(true)
   const [sfxEnabled,   setSfxEnabled]   = useState(false)
+  const [sfxCategories, setSfxCategories] = useState<SfxCategory[]>([...SFX_CATEGORIES])
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState<string | null>(null)
 
@@ -76,7 +78,7 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
         tts_model_dir: ttsDir.trim(), speakers: speakerList,
       })
       onCreated(result.project, result.progress, llmPath.trim(), ttsDir.trim(), speakerList, {
-        chapterRange, outputFormat, vramCheck, sfxEnabled,
+        chapterRange, outputFormat, vramCheck, sfxEnabled, sfxCategories,
       }, epub)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
@@ -239,18 +241,39 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
         <span className="text-[11px] text-ink-secondary">VRAM barrier between LLM &amp; TTS</span>
       </label>
 
-      {/* Sound design toggle */}
-      <label className="flex items-center gap-2.5 cursor-pointer select-none">
-        <input
-          type="checkbox"
-          checked={sfxEnabled}
-          onChange={e => setSfxEnabled(e.target.checked)}
-          className="w-3.5 h-3.5 accent-[#FBBF24] cursor-pointer"
-        />
-        <span className="text-[11px] text-ink-secondary">
-          Sound design — layer reviewed ambience &amp; sfx cues
-        </span>
-      </label>
+      {/* Sound design: master switch + per-layer toggles */}
+      <div className="space-y-2">
+        <label className="flex items-center gap-2.5 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={sfxEnabled}
+            onChange={e => setSfxEnabled(e.target.checked)}
+            className="w-3.5 h-3.5 accent-[#FBBF24] cursor-pointer"
+          />
+          <span className="text-[11px] text-ink-secondary">
+            Sound design — layer reviewed cues under the voice
+          </span>
+        </label>
+        {sfxEnabled && (
+          <div className="ml-6 flex flex-col gap-1.5">
+            {SFX_CATEGORIES.map(cat => (
+              <label key={cat} className="flex items-center gap-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={sfxCategories.includes(cat)}
+                  onChange={e => setSfxCategories(prev =>
+                    e.target.checked ? [...prev, cat] : prev.filter(c => c !== cat))}
+                  className="w-3.5 h-3.5 accent-[#FBBF24] cursor-pointer"
+                />
+                <span className="text-[11px] text-ink-secondary">{CATEGORY_LABEL[cat]}</span>
+              </label>
+            ))}
+            {sfxCategories.length === 0 && (
+              <span className="text-[9px] text-ink-ghost">No layers selected — sound design is off.</span>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Error */}
       {error && (

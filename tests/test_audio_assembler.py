@@ -468,6 +468,68 @@ def test_sfx_enabled_routes_through_sound_designer():
     print("  PASS test_sfx_enabled_routes_through_sound_designer")
 
 
+# ── Per-category sound-design filtering ───────────────────────────────────────
+
+def test_sfx_categories_filters_to_enabled_only():
+    """sfx_enabled + sfx_categories=['ambience'] => only the scene cue is layered;
+    the sfx and music cues are dropped before reaching SoundDesigner."""
+    sm = _tmp_sm()
+    _, ch_id = _seed_chapter_with_tts_lines(sm, n_lines=2)
+    sm.replace_chapter_cues(ch_id, [
+        {"cue_type": "scene", "tag": "cold_rain",       "line_start": 0, "line_end": 1},
+        {"cue_type": "sfx",   "tag": "sword_clash",     "line_start": 1, "at_anchor": "start"},
+        {"cue_type": "music", "tag": "dread_low_drone", "line_start": 0, "duration_s": 8},
+    ])
+    with tempfile.TemporaryDirectory() as wav_dir, \
+         tempfile.TemporaryDirectory() as out_dir:
+        lines = sm.get_pending_tts_lines(ch_id)
+        for i, line in enumerate(lines):
+            wav = _make_real_wav(Path(wav_dir) / f"line_{i:04d}.wav")
+            sm.mark_line_tts_done(line["id"], str(wav))
+
+        captured = {}
+        asm = AudioAssembler(sm, out_dir, cfg={"sfx_enabled": True,
+                                               "sfx_categories": ["ambience"]})
+        asm._check_ffmpeg = lambda: None
+        def fake_sd(chapter_id, tts_done, list_path, tmp_path, output_path, cues):
+            captured["cues"] = cues
+            output_path.write_bytes(b"X" * 5000)
+        asm._assemble_with_sound_design = fake_sd
+        asm._run_ffmpeg = lambda lp, op: op.write_bytes(b"X" * 5000)
+        asm.assemble_chapter(ch_id)
+
+        assert "cues" in captured, "sound-design path did not run"
+        types = sorted(c["cue_type"] for c in captured["cues"])
+        assert types == ["scene"], f"expected only the ambience(scene) cue, got {types}"
+    print("  PASS test_sfx_categories_filters_to_enabled_only")
+
+
+def test_sfx_categories_empty_uses_plain_path():
+    """sfx_enabled True but no categories selected => nothing layered (plain concat)."""
+    sm = _tmp_sm()
+    _, ch_id = _seed_chapter_with_tts_lines(sm, n_lines=2)
+    sm.replace_chapter_cues(ch_id, [
+        {"cue_type": "scene", "tag": "cold_rain", "line_start": 0, "line_end": 1},
+    ])
+    with tempfile.TemporaryDirectory() as wav_dir, \
+         tempfile.TemporaryDirectory() as out_dir:
+        lines = sm.get_pending_tts_lines(ch_id)
+        for i, line in enumerate(lines):
+            wav = _make_real_wav(Path(wav_dir) / f"line_{i:04d}.wav")
+            sm.mark_line_tts_done(line["id"], str(wav))
+
+        used = {"plain": False, "sound_design": False}
+        asm = AudioAssembler(sm, out_dir, cfg={"sfx_enabled": True, "sfx_categories": []})
+        asm._check_ffmpeg = lambda: None
+        asm._run_ffmpeg = lambda lp, op: (used.__setitem__("plain", True), op.write_bytes(b"X" * 5000))
+        asm._assemble_with_sound_design = lambda *a, **k: used.__setitem__("sound_design", True)
+        asm.assemble_chapter(ch_id)
+
+    assert used["plain"] is True
+    assert used["sound_design"] is False
+    print("  PASS test_sfx_categories_empty_uses_plain_path")
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 TESTS = [
@@ -487,6 +549,8 @@ TESTS = [
     test_assemble_chapter_ffmpeg_receives_correct_list,
     test_sfx_disabled_uses_plain_concat_path,
     test_sfx_enabled_routes_through_sound_designer,
+    test_sfx_categories_filters_to_enabled_only,
+    test_sfx_categories_empty_uses_plain_path,
 ]
 
 if __name__ == "__main__":

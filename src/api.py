@@ -75,7 +75,8 @@ class PipelineStart(BaseModel):
     output_format:      str   = "mp3"
     vram_check_enabled: bool  = True
     batch_size:         int   = 8   # chapters per LLM/TTS load-unload cycle (measured swap tax ~47s/ch, mostly the 40s TTS load)
-    sfx_enabled:        bool  = False  # layer ambience/sfx/music under the voice (CPU-only)
+    sfx_enabled:        bool  = False  # master switch — layer sound under the voice (CPU-only)
+    sfx_categories:     list[str] = ["ambience", "sfx", "music"]  # which layers to render when enabled
 
     @property
     def resolved_model_dir(self) -> str:
@@ -455,6 +456,11 @@ async def start_pipeline(
 
     ch_range = tuple(req.chapter_range) if req.chapter_range else None
 
+    # Keep only valid categories, preserving the canonical order. Unknown entries
+    # are silently dropped so a stray value can't crash a run.
+    sfx_categories = [c for c in ("ambience", "sfx", "music")
+                      if c in set(req.sfx_categories) & _SFX_CATEGORIES]
+
     model_dir = req.resolved_model_dir
     if not model_dir:
         raise HTTPException(
@@ -475,6 +481,7 @@ async def start_pipeline(
         vram_check_enabled= req.vram_check_enabled,
         batch_size        = max(1, req.batch_size),
         sfx_enabled       = req.sfx_enabled,
+        sfx_categories    = sfx_categories,
         sfx_dir           = str(_SFX_DIR),
     )
 
@@ -612,6 +619,12 @@ async def list_chapter_lines(
     """All diarized lines for a chapter (speaker, text, emotion, status, audio_path)."""
     lines = sm.get_lines_for_chapter(chapter_id)
     return {"lines": lines, "total": len(lines)}
+
+
+@app.get("/api/diarize-prompt")
+async def get_diarize_prompt():
+    """Return the exact system prompt the diarizer expects, for external agents."""
+    return {"system_prompt": dio.build_system_prompt_text()}
 
 
 @app.get("/api/chapters/{chapter_id}/segments")

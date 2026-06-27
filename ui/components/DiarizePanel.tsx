@@ -39,7 +39,7 @@ const PROVIDERS: ProviderCfg[] = [
   { id: 'openai', label: 'ChatGPT · OpenAI', keyStore: 'openai_api_key',
     modelStore: 'diar_model_openai', defaultModel: 'gpt-4o', placeholder: 'sk-…' },
   { id: 'gemini', label: 'Gemini · Google', keyStore: 'gemini_api_key',
-    modelStore: 'diar_model_gemini', defaultModel: 'gemini-1.5-pro', placeholder: 'AIza…' },
+    modelStore: 'diar_model_gemini', defaultModel: 'gemini-2.5-flash', placeholder: 'AIza…' },
 ]
 
 const PROVIDER_CFG = (id: DiarizeProvider) =>
@@ -70,7 +70,10 @@ export default function DiarizePanel({ chapter, onChanged }: {
   useEffect(() => {
     const cfg = PROVIDER_CFG(provider)
     setApiKey(localStorage.getItem(cfg.keyStore) ?? '')
-    setModel(localStorage.getItem(cfg.modelStore) ?? cfg.defaultModel)
+    let stored = localStorage.getItem(cfg.modelStore) ?? cfg.defaultModel
+    // gemini-3.1-pro was the wrong API id; the correct one adds -preview
+    if (stored === 'gemini-3.1-pro') stored = 'gemini-3.1-pro-preview'
+    setModel(stored)
   }, [provider])
 
   useEffect(() => { setResults([]) }, [chapter?.id])
