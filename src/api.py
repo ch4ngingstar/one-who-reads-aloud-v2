@@ -621,12 +621,6 @@ async def list_chapter_lines(
     return {"lines": lines, "total": len(lines)}
 
 
-@app.get("/api/diarize-prompt")
-async def get_diarize_prompt():
-    """Return the exact system prompt the diarizer expects, for external agents."""
-    return {"system_prompt": dio.build_system_prompt_text()}
-
-
 @app.get("/api/chapters/{chapter_id}/segments")
 async def get_chapter_segments(
     chapter_id: int,
