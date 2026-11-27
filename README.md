@@ -33,13 +33,11 @@
 
 ## Highlights
 
-| | |
-|---|---|
-| 🎭 **A real cast** | The narrator and Sunny, Cassie, Anvil and Seishan are recorded with OmniVoice; every other character with Fish S2 Pro. Each casting choice won a blind listening test. Speakers without a voice of their own get a stand-in of the right gender, never the narrator. |
-| 🔍 **Attribution with review** | A local Qwen3-14B labels every quote in two independent passes; Gemma 3, a different model family, checks it. On held-out chapters, lines where all three agree were **98.4%** right, and **16.7%** of lines were flagged for review (9.7% across 80 real chapters). |
-| 📖 **The whole text** | Chapters are read straight from the EPUB, recovering paragraphs an older parser had dropped. «Guillemets», mixed quote marks and unclosed quotes are understood, and site watermarks ("novelfire.net" in small capitals) are removed before anyone reads them aloud. |
-| 🎚️ **Studio finish** | Whisper reads takes back and retakes clear misreads; actors are levelled to a common loudness; pauses follow paragraphs and turns of conversation; files carry real chapter numbers and titles; volumes export as M4B with chapter marks. |
-| 🧰 **One button** | Pick a book and a chapter range in the app and press Start. Labelling, checking, recording and mixing run in order with one model on the GPU at a time. Interrupted runs continue chapter by chapter. |
+- 🎭 **A real cast** — The narrator and Sunny, Cassie, Anvil and Seishan are recorded with OmniVoice; every other character with Fish S2 Pro. Each casting choice won a blind listening test. Speakers without a voice of their own get a stand-in of the right gender, never the narrator.
+- 🔍 **Attribution with review** — A local Qwen3-14B labels every quote in two independent passes; Gemma 3, a different model family, checks it. On held-out chapters, lines where all three agree were **98.4%** right, and **16.7%** of lines were flagged for review (9.7% across 80 real chapters).
+- 📖 **The whole text** — Chapters are read straight from the EPUB, recovering paragraphs an older parser had dropped. «Guillemets», mixed quote marks and unclosed quotes are understood, and site watermarks ("novelfire.net" in small capitals) are removed before anyone reads them aloud.
+- 🎚️ **Studio finish** — Whisper reads takes back and retakes clear misreads; actors are levelled to a common loudness; pauses follow paragraphs and turns of conversation; files carry real chapter numbers and titles; volumes export as M4B with chapter marks.
+- 🧰 **One button** — Pick a book and a chapter range in the app and press Start. Labelling, checking, recording and mixing run in order with one model on the GPU at a time. Interrupted runs continue chapter by chapter.
 
 <details>
 <summary><b>Screenshots</b></summary>
