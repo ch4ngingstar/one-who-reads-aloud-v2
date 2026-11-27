@@ -1,0 +1,377 @@
+{
+  "version": 1,
+  "purpose": "Voice-design briefs for the principal cast, derived from how the novel itself describes each voice (mined from pipeline.db chunks, 2026-11-25). Each designed clip becomes a clean, exactly-transcribed cloning reference for OmniVoice. Additive only: existing registered voices are never overwritten.",
+  "recording": "Clean close-mic studio recording, dry, no reverb, no music, no background noise.",
+  "characters": {
+    "Sunny": {
+      "candidates": 4,
+      "novel_evidence": "even (19), neutral (17), cold, subdued, indifferent, calm, somber, dark; 'Anvil's voice was calm and regal, Sunny's was sinister and dark'.",
+      "instruct": "A young man in his early twenties. Low-to-mid pitched, slightly husky baritone with a dry, deadpan delivery. Even and quiet, guarded and cool, with an undercurrent of dark sarcasm. Speaks unhurriedly and clearly, never theatrical.",
+      "reference_script": "Look, I'm not saying it's a bad plan. I'm saying it's the kind of plan that gets people killed. So if we're doing this, we do it my way. Quietly. And nobody plays the hero.",
+      "audition_lines": [
+        "I know. But it doesn't make it easy.",
+        "Not bad for a rookie Sovereign, don't you think?"
+      ]
+    },
+    "Nephis": {
+      "candidates": 4,
+      "novel_evidence": "even (13), calm, cold, clear, quiet, pleasant, emotionless; 'Neph's voice was cold, and her expression was stern'.",
+      "instruct": "A young woman in her early twenties. Clear, cool mezzo-soprano voice, calm and even, with quiet authority and composure. Measured, deliberate pace with very little emotion showing; restrained, noble and slightly distant, but not harsh.",
+      "reference_script": "We will rest here until nightfall. Then we move east, along the ridge. I know you are tired. So am I. But if we stop now, we will not get another chance.",
+      "audition_lines": [
+        "You don't really have to tell me. I already know.",
+        "I was never even here. I am actually in the waking world right now."
+      ],
+      "variants": [
+        "A young woman in her early twenties. Low, smooth alto voice with a velvety warmth underneath; calm, even and quietly regal. She speaks softly but with absolute certainty, unhurried, every word deliberate. Composed and dignified, never harsh.",
+        "A young woman in her early twenties with a refined, neutral British accent. Crystal-clear, cool, precise voice; calm and composed, with noble poise and quiet authority. Measured, even pacing and restrained emotion.",
+        "A young woman in her early twenties. Soft-spoken, clear and gentle voice, calm and serene, speaking quietly as if to one person close by. Cool and reserved but kind underneath; slow, even, thoughtful delivery.",
+        "A young woman in her mid-twenties, a seasoned warrior. Slightly husky, grounded mid-low voice, steady and stoic, with calm resolve and quiet strength. Plain, direct, unhurried delivery with no theatricality.",
+        "A young woman in her early twenties. Natural, understated, conversational voice with a clear, pleasant mid-range tone; calm and matter-of-fact, emotionally reserved, speaking simply and honestly. Relaxed, even pace, nothing performed.",
+        "A young woman in her early twenties. Silvery, clear, slightly airy voice with a distant, ethereal calm; composed and emotionless on the surface, with a faint melancholy beneath. Slow, even, measured speech."
+      ],
+      "variants_note": "Round 2 (2026-11-25): the owner rejected the round-1 pick (cand_2) — 'the voice of nephis really need to be changed'. Each variant explores a different reading of the novel's 'calm, cold, clear, even' voice; candidate n > candidates uses variants[n - candidates - 1]."
+    },
+    "Cassie": {
+      "candidates": 4,
+      "novel_evidence": "pleasant, calm and steady, gentle, measured, composed; her voice often 'resounds in your head, as if whispering into your ear'.",
+      "instruct": "A young woman around twenty. Soft, gentle, warm voice with a pleasant, calm and steady tone; soothing and thoughtful, slightly breathy, speaking softly as if close to the listener's ear. Gentle, unhurried pace.",
+      "reference_script": "Don't worry. I can't see the path, but I know where it leads. Just take my hand and walk slowly. There is nothing waiting for us there... at least, not yet.",
+      "audition_lines": [
+        "Indeed. However, it is a very special one. This lantern does not produce light. Instead, it swallows it.",
+        "You have my gratitude. It is time for you to depart, though… go and rest, for a little while. Seishan, please stay."
+      ]
+    },
+    "Rain": {
+      "candidates": 4,
+      "novel_evidence": "friendly, carefree, serious, amused, sometimes husky or soft; Sunny's younger sister.",
+      "instruct": "A teenage girl of about seventeen. Bright, natural, friendly young female voice, a little husky, casual and down-to-earth, with carefree, slightly teasing warmth. Conversational pace.",
+      "reference_script": "Okay, okay, I get it. You're worried. But I trained for this, you know? I'm not a kid anymore. Besides, if something goes wrong, I'll just run really, really fast.",
+      "audition_lines": [
+        "Sunny, do you think... that it will be alright? The… all of it, I mean.",
+        "Right. I guess I'll continue playing the peasant and let Tamar be the princess... for a while longer. But then!"
+      ]
+    },
+    "Effie": {
+      "candidates": 3,
+      "novel_evidence": "booming, thundering, pleasant, teasing, lazy; 'chaos, muscles and violence in human form', protective big-sister energy.",
+      "instruct": "A woman in her mid-twenties. Big, strong, warm and playful female voice, confident and loud, with hearty, teasing, mischievous energy and an easy laugh in it. Lively pace.",
+      "reference_script": "Ha! You call that a fight? I barely broke a sweat. Come on, cheer up, we're alive, aren't we? Now, who's cooking tonight? Because I'm starving, and it's definitely not going to be me.",
+      "audition_lines": [
+        "My, oh my. The seasoning is just perfect! Just like I prefer it... no, really, I couldn't have made it better myself!",
+        "Forget it. Gods, why do I even bother…"
+      ],
+      "variants": [
+        "A woman in her late twenties. Rich, warm, full-bodied alto with a confident, easygoing swagger and a laugh always close beneath; loud and teasing when playful, steady and caring when serious. Natural, relaxed pace.",
+        "A strong woman around thirty, a seasoned warrior and young mother. Bright, resonant, slightly husky voice, cheerful and blunt, big-hearted big-sister energy; lively and expressive without shouting."
+      ],
+      "audition_lines_round3": [
+        "I am not huge. I am comely, curvaceous, and shapely. Why, jealous much?",
+        "Well, well, well. Hey there, Tinker Bell."
+      ]
+    },
+    "Kai": {
+      "candidates": 3,
+      "novel_evidence": "pleasant, beautiful, 'magnificent', 'irresistible authority'; the Nightingale, whose voice itself is enchanting.",
+      "instruct": "A young man in his early twenties. Exceptionally beautiful, smooth, melodic baritone voice, warm, kind and charming, with rich resonance and gentle confidence, like a gifted singer speaking. Relaxed, polite pace.",
+      "reference_script": "Hey, it's alright. Take a breath. You did everything you could, and we're still here, together. That counts for something. Come on, let's get some rest. I'll take the first watch.",
+      "audition_lines": [
+        "No, I am not one of the Others. Come eat, everyone. The food is getting cold.",
+        "The three of us did, sure. Why? Have you guys never killed a Great Devil?"
+      ]
+    },
+    "Anvil": {
+      "candidates": 3,
+      "novel_evidence": "deep, calm and regal, cold indifference, hoarse, powerful, 'irresistible authority hiding in Anvil's deep voice'.",
+      "instruct": "A middle-aged man. Deep, resonant bass-baritone voice, calm, regal and commanding, with cold indifference and immense quiet authority. Slow, deliberate, measured delivery; every word weighed.",
+      "reference_script": "You mistake my patience for weakness. I have no need to raise my voice. The war will end, one way or another, and when it does, only those who knelt will remain standing.",
+      "audition_lines": [
+        "How useless. Do you feel confident now that you have amassed all that power, Song?",
+        "Is it really wise, to point a sword that I myself forged at me?"
+      ]
+    },
+    "Morgan": {
+      "candidates": 3,
+      "novel_evidence": "calm, indifferent, aloof, deep, beautiful, 'a hint of amusement in Morgan's voice'.",
+      "instruct": "A young woman in her early twenties. Smooth, low, elegant alto voice, calm and aloof, with cool, indifferent poise and a faint hint of dry amusement. Composed, unhurried, aristocratic delivery.",
+      "reference_script": "How interesting. You came all this way just to tell me something I already knew. Still, I appreciate the effort. Sit down. We have a great deal to discuss, and very little time.",
+      "audition_lines": [
+        "Leave it to my brother to find a common language with the Nightmare Creatures…",
+        "...I have the remnants of the House of Night."
+      ]
+    },
+    "Mordret": {
+      "candidates": 3,
+      "novel_evidence": "pleasant, insidious, curious, 'an ominous note found its way into Mordret's pleasant voice'.",
+      "instruct": "A young man in his twenties. Pleasant, soft-spoken, polished tenor voice, charming and polite on the surface with an unsettling, insidious, amused undertone. Calm, smooth, unhurried delivery.",
+      "reference_script": "Oh, don't look at me like that. I'm only here to talk. Truly. Of course, you're free to leave whenever you want... if you can find the way out, that is.",
+      "audition_lines": [
+        "Me? I am Prince Mordret of Valor, the rightful heir of these lands.",
+        "How unexpectedly eloquent. Are you per chance stalling for time, Saint Athena?"
+      ]
+    },
+    "Seishan": {
+      "candidates": 3,
+      "novel_evidence": "husky, velvety, 'calm, collected, strong... but not harsh', raspy.",
+      "instruct": "A woman in her late twenties. Husky, velvety low female voice, calm, collected and strong but not harsh, with quiet, mature confidence. Measured pace.",
+      "reference_script": "Stay behind me and keep your eyes open. The tide is turning, and it will not wait for us. Whatever happens next, we hold this line. Together, or not at all.",
+      "audition_lines": [
+        "If you want to be worried about someone, worry about yourself. Out of the three of us, your task is the most uncertain.",
+        "Fortify this position and hold fast. Hel, Siord, Ceres — with me! We will claim this Citadel... in the name of the Queen!"
+      ]
+    },
+    "Jet": {
+      "candidates": 1,
+      "novel_evidence": "calm, cold voice; harsh; relaxed smile; Soul Reaper; about 600 lines after ch 2300 (estimate).",
+      "instruct": "A woman in her late twenties, a deadly veteran soldier. Low, cool, laconic voice with dry, deadpan humor; calm and cold, slightly raspy, unbothered and relaxed but quietly dangerous. Unhurried, clipped delivery.",
+      "variants": [
+        "A woman around thirty with a smoky, low alto voice; terse, sardonic and world-weary, cool-headed and blunt, speaking in short, dry sentences with a faint lazy drawl.",
+        "A young woman with a crisp, cold, quiet mezzo voice; emotionless on the surface, precise and sharp, with a hint of grim amusement. Calm, steady pace.",
+        "A tough woman in her late twenties; husky, gravelly, low voice, casual and nonchalant, laconic and wry, with an edge of menace under the calm."
+      ],
+      "reference_script": "Relax. If they wanted us dead, we would already know it. Keep your weapons sheathed and let me do the talking. I have dealt with worse than this before breakfast.",
+      "audition_lines": [
+        "Are you really just going to trade insults?",
+        "It would be really inconvenient for me if you conquer Bastion. So... sorry. We'll stay."
+      ],
+      "round": 3
+    },
+    "Saint Naeve": {
+      "candidates": 1,
+      "novel_evidence": "subdued, cold and heavy tones; pleasant; melancholy; a Saint of the House of Night (the Nightwalker).",
+      "instruct": "A man in his early thirties, a noble Saint of the House of Night. Cool, quiet, slightly melancholic baritone; reserved, even and controlled, polite and soft-spoken with a heavy undertone.",
+      "variants": [
+        "A man in his thirties; smooth, low, calm voice with a gentle, weary sadness; courteous, measured, aristocratic restraint.",
+        "A composed man around thirty; clear, cool tenor-baritone, serious and steady, speaking quietly with careful precision and a hint of coldness."
+      ],
+      "reference_script": "We sail at dawn. The mist will hide us for a while, but not forever. If the Dutchman finds us before we reach the shore, there will be nothing left to bury. Rest while you can.",
+      "audition_lines": [
+        "I am sorry, Lord Shadow. Sunny? It's just... a lot to take in.",
+        "Where would we find enchanted siege engines, though? Ones worthy of the Night Garden, no less."
+      ],
+      "round": 3
+    },
+    "Asterion": {
+      "candidates": 1,
+      "novel_evidence": "Lord Asterion; courteous, playful menace ('Are you not going to welcome me home, dear Nephis?').",
+      "instruct": "A man in his forties, a powerful and charismatic lord. Smooth, rich, persuasive baritone with calm authority and a faintly menacing warmth; courteous and unhurried, every word deliberate.",
+      "variants": [
+        "An ancient, serene being in a man's body; deep, soft, hypnotic voice, gentle and patient, unsettlingly calm and kind.",
+        "A commanding man in his forties; resonant, polished bass-baritone, regal and self-assured, cool, with a subtle edge of contempt."
+      ],
+      "reference_script": "You misunderstand me. I have no wish to destroy anything. I only want to wake the world from its long nightmare. Stand with me, and you will see it for yourself.",
+      "audition_lines": [
+        "Are you not going to welcome me home, dear Nephis? I've been away for so long.",
+        "The Lord of Shadows... Sunless, was it? This is our first proper meeting, I think. My name is Asterion."
+      ],
+      "round": 3
+    },
+    "Azarax": {
+      "candidates": 1,
+      "novel_evidence": "'a grating voice'; Azarax the Mighty, an ancient, ill-tempered Supreme who despises Weaver's thralls.",
+      "instruct": "An ancient, long-dead king. Grating, rasping, dry and brittle old male voice, like bones scraping; imperious, ill-tempered and arrogant, theatrical contempt, booming when offended.",
+      "variants": [
+        "A very old man with a harsh, gravelly, croaking voice; pompous and grandiose, haughty royal disdain, sharp and cantankerous.",
+        "An ancient warrior-king; deep, hollow, raspy bass voice with an eerie echo of the grave, proud, irritable and commanding."
+      ],
+      "reference_script": "Silence, worm! Do you know whom you address? I am Azarax the Mighty, and kings once trembled at my name. Bow your head, thrall of Weaver, before I lose my patience.",
+      "audition_lines": [
+        "It does not matter why the battle happened. All you need to know is that it was glorious.",
+        "It's a shame that he escaped Hell before me. Oh, how joyous it would have been, to join the battle together!"
+      ],
+      "round": 3
+    },
+    "Yutra": {
+      "candidates": 1,
+      "novel_evidence": "'Yutra's hoarse voice was full of confusion'; quiet, subdued tones; an Awakened man with a wife and children.",
+      "instruct": "A man in his early thirties, an ordinary Awakened soldier. Slightly hoarse, tired baritone; nervous, confused and earnest, speaking quietly and hesitantly, an everyman voice.",
+      "variants": [
+        "A young man in his late twenties; plain, soft, slightly raspy voice, anxious and polite, uncertain, often trailing off.",
+        "A man around thirty-five; rough, hoarse, weary voice, wary and subdued, but sincere and stubborn."
+      ],
+      "reference_script": "I'm sorry, I... I don't remember how I got here. The last thing I recall is the bridge, and then nothing. Please, just tell me where we are. I won't cause any trouble.",
+      "audition_lines": [
+        "Why would I hesitate? If that is Lord Asterion's will.",
+        "Then I will let my children starve, kill whoever he wishes me to kill, and leave my wife without looking back. Naturally!"
+      ],
+      "round": 3
+    },
+    "Little Ling": {
+      "candidates": 1,
+      "novel_evidence": "Effie's young son; tentative, curious, polite ('Auntie Aiko...').",
+      "instruct": "A boy about seven years old. Bright, clear, sweet child's voice; curious, tentative and polite, a little shy, speaking carefully like a well-behaved kid.",
+      "variants": [
+        "A cheerful little boy around eight; high, lively, playful child's voice, eager and talkative.",
+        "A small boy about six; soft, gentle, earnest child's voice, timid and thoughtful."
+      ],
+      "reference_script": "Mom said I have to finish my lessons first. But after that, can you show me the trick with the shadows again? Please? I promise I'll be careful this time.",
+      "audition_lines": [
+        "Auntie Aiko, I know that this is a secret party, but can we leave a little cake for mommy? Mommy eats a lot.",
+        "Nothing. It's just that I don't think you're really suited to be a teacher, Auntie."
+      ],
+      "round": 3
+    },
+    "Pill": {
+      "candidates": 1,
+      "novel_evidence": "a bearded caravan guard with harsh eyes; mumbles wistfully; an old acquaintance of Rain.",
+      "instruct": "A rough, bearded man in his thirties, a merchant-caravan guard. Gruff, gravelly, working-class voice, blunt and streetwise but friendly, a bit wistful.",
+      "variants": [
+        "A burly man around forty; deep, rough, smoky voice, easygoing and joking, a little rough around the edges.",
+        "A wiry man in his thirties; raspy, quick, slangy voice, sly and good-natured."
+      ],
+      "reference_script": "Well, would you look at that. Last time I saw you, you were stealing apples from the market. Now look at you, all grown up and dangerous. Life is funny like that.",
+      "audition_lines": [
+        "Stop embarrassing me in front of Rani, will you? Goodness, she'll think that we wanderers are all weak in the head department.",
+        "I see you're doing well for yourself, Rani... I'm glad."
+      ],
+      "round": 3
+    },
+    "Noctis": {
+      "candidates": 1,
+      "novel_evidence": "the Sorcerer, with a 'stunning face'; ancient, playful, weary of immortality ('I wanted to ask you to help me die').",
+      "instruct": "A strikingly beautiful, ageless man. Smooth, playful, theatrical baritone, elegant and mischievous, effortlessly charming, with a weary, ancient depth beneath the levity.",
+      "variants": [
+        "An eccentric, flamboyant man; light, musical, expressive tenor voice, whimsical and teasing, quick-witted with dramatic flair.",
+        "A mysterious man of indeterminate age; velvety, soft, sly voice, amused and knowing, lazy and seductive."
+      ],
+      "reference_script": "Prosperity and hopelessness, what a pair. Do not look at me like that, I am perfectly harmless. Well, mostly. Sit, sit! We have all the time in the world, and so very little of it.",
+      "audition_lines": [
+        "Why are you telling me this, Weaver? How does that answer my question?",
+        "In short, I wanted to ask you to help me die."
+      ],
+      "round": 3
+    },
+    "Tegrot": {
+      "candidates": 1,
+      "novel_evidence": "a friendly, practical Awakened who looks after Yutra ('You can just call me Tegrot').",
+      "instruct": "A friendly, practical man in his thirties. Warm, brisk, matter-of-fact baritone, helpful and patient, a little tired, speaking plainly.",
+      "variants": [
+        "A cheerful man around forty; hearty, kind, slightly nasal voice, chatty and reassuring.",
+        "A calm, no-nonsense man in his thirties; clear, steady, professional voice, efficient and polite."
+      ],
+      "reference_script": "Take it easy, friend. Nobody is going to hurt you here. Drink some water, read the notes I left on the table, and then we will talk about what happened. One thing at a time.",
+      "audition_lines": [
+        "Hey, Rit. I think Yutra is contaminated. He's spouting insane things. Should I report him to Lady Cassia?"
+      ],
+      "round": 3
+    },
+    "Death Singer": {
+      "candidates": 1,
+      "novel_evidence": "one of the Song daughters; 'her voice sounding strangely excited'; trembling at times; macabre, childlike.",
+      "instruct": "A young woman who sounds oddly girlish. Airy, sing-song, eerily excitable voice with a macabre cheerfulness; curious, quick and whimsical, slightly unhinged.",
+      "variants": [
+        "A young woman with a bright, breathy, high voice; childlike, dreamy and playful, with an unsettling, morbid innocence.",
+        "A young woman with a soft, melodic singer's voice; gentle and strange, distracted and fascinated, giggling at dark things."
+      ],
+      "reference_script": "Oh! This room smells like death. Isn't it lovely? Sister, come and look, I found something strange. Can I keep it? I promise I will be very, very gentle with it.",
+      "audition_lines": [
+        "Yeah. Even if he has been led astray... I am still on his side. I'll always be on his side!",
+        "We're all going to live for a long, long time!"
+      ],
+      "round": 3
+    },
+    "Beth": {
+      "candidates": 1,
+      "novel_evidence": "Chief Bethany; casual and blunt, eats chips at her desk; Sunny knew her from before.",
+      "instruct": "A tough woman in her thirties, a busy chief. Slightly husky, relaxed alto, dry humor, casual, direct and no-nonsense, a little sarcastic.",
+      "variants": [
+        "A sturdy woman around forty; warm, loud, brassy voice, bossy but kind, quick to joke.",
+        "A woman in her early thirties; crisp, tired, clipped voice, practical and blunt."
+      ],
+      "reference_script": "Two years I spent training you, and now you are leaving for some fancy Citadel? Unbelievable. Fine. Go. But if they treat you badly, you come straight back here, understood?",
+      "audition_lines": [
+        "Returning? Who is going to get rid of that ugly thing, then?!",
+        "These days? The world has never not been mad, don't you think?"
+      ],
+      "round": 3
+    },
+    "Quentin": {
+      "candidates": 1,
+      "novel_evidence": "Master Quentin; 'his pleasant voice tinged with a complicated emotion'; curious, friendly.",
+      "instruct": "A man in his late twenties. Pleasant, easygoing, warm baritone, friendly and thoughtful, a little curious and teasing.",
+      "variants": [
+        "A young man around twenty-five; bright, clear tenor, upbeat and polite, slightly earnest.",
+        "A man in his thirties; smooth, calm, mellow voice, laid-back and good-humored."
+      ],
+      "reference_script": "Honestly, nobody tells us anything around here. We get a map, a deadline, and a pat on the back. Still, I would not trade this team for anything. Well, maybe for a hot meal.",
+      "audition_lines": [
+        "Lady Aiko. You know, it would be much easier on us if we knew what it is that we are looking out for, exactly.",
+        "Yeah. I'd like to know as well."
+      ],
+      "round": 3
+    },
+    "The Hardened Awakened": {
+      "candidates": 1,
+      "novel_evidence": "NPC archetype: veteran soldiers, government hunters, guards (66 labelled lines).",
+      "instruct": "A battle-hardened soldier in his forties. Rough, weathered, gravelly baritone; terse, practical and tired, speaking like a veteran on a battlefield.",
+      "variants": [
+        "A grizzled male veteran around fifty; deep, raspy, low voice, calm and grim.",
+        "A tough female soldier in her thirties; firm, slightly husky, clipped and steady voice, blunt and capable."
+      ],
+      "reference_script": "Keep your heads down and your blades ready. The wall held last night, but it won't hold forever. When the horn sounds, you run for the gate and you don't look back. Understood?",
+      "audition_lines": [
+        "They say that he split in four at the end of the battle, each incarnation wielding a deadly blade.",
+        "I don't really know what is happening, but weren't we supposed to start killing soon? Hello?"
+      ],
+      "round": 3
+    },
+    "The Legacy Noble": {
+      "candidates": 1,
+      "novel_evidence": "NPC archetype: Valor and Song clan members, aristocrats (70 labelled lines).",
+      "instruct": "An aristocratic nobleman in his forties. Refined, cultured, haughty baritone; measured, condescending and self-assured, every word polished.",
+      "variants": [
+        "An aristocratic noblewoman in her thirties; cool, elegant, crisp voice, polite with icy condescension.",
+        "A young, arrogant nobleman; smooth, smug, lilting tenor, entitled and dismissive."
+      ],
+      "reference_script": "How quaint. You must be new to the court. A word of advice, then: in this city, a name is worth more than a sword, and yours, I'm afraid, is worth very little.",
+      "audition_lines": [
+        "Ah, yes. Me too... I mean, I want to stretch my legs too, Your Majesty. Not that I am afraid of heights.",
+        "Lady Cassia... there are more prisoners waiting to be interrogated. If you will."
+      ],
+      "round": 3
+    },
+    "The Bureaucrat": {
+      "candidates": 1,
+      "novel_evidence": "NPC archetype: academy instructors, officials, clerks (32 labelled lines).",
+      "instruct": "A brisk female administrator in her forties. Crisp, clipped, impersonal voice; officious, efficient and slightly bored, as if she has said this a thousand times.",
+      "variants": [
+        "A middle-aged male official; dry, nasal, monotone voice, procedural and pedantic.",
+        "A stern female instructor in her fifties; firm, clear, authoritative voice, strict but fair."
+      ],
+      "reference_script": "Name, rank, and Aspect, please. No, the other form. Sign at the bottom, then wait in the hall until your number is called. Next! I said next, not you, sir.",
+      "audition_lines": [
+        "Lady Changing Star, Master Sunless. It's an honor.",
+        "Yes, I have to agree. It does seem like that."
+      ],
+      "round": 3
+    },
+    "The Dream Realm Wanderer": {
+      "candidates": 1,
+      "novel_evidence": "NPC archetype: scavengers, Sleepers, desperate survivors (12 labelled lines).",
+      "instruct": "A desperate, worn-out survivor; thin, strained, slightly hoarse male voice, wary and frightened, speaking in hushed, urgent bursts.",
+      "variants": [
+        "A ragged female scavenger; low, rough, guarded voice, suspicious and hungry.",
+        "An old wanderer; cracked, shaky, weary voice, half-mad from loneliness."
+      ],
+      "reference_script": "Stay away from the ruins after dark. I have seen what crawls out of there. We lost three people last week, just like that. Do you have any food? Anything at all?",
+      "audition_lines": [
+        "Please, Lady Nephis! You... you are Changing Star. Please save the others!"
+      ],
+      "round": 3
+    },
+    "The Nightmare Abomination": {
+      "candidates": 1,
+      "novel_evidence": "NPC archetype: corrupted creatures that speak (13 labelled lines).",
+      "instruct": "An inhuman monster speaking in a deep, guttural, rasping voice, slow and hungry, with a wet, growling texture; unsettling and ancient.",
+      "variants": [
+        "A creature with a hissing, whispery, sibilant voice, cold and predatory, unnaturally smooth.",
+        "A massive beast with a booming, cavernous, distorted bass voice, slow and menacing."
+      ],
+      "reference_script": "Little things... little warm things... you came so far into the dark. Come closer. I can hear your heart. It is beating so fast, so very fast.",
+      "audition_lines": [
+        "Ah... I am feeling ignored. Don't you have any words to spare for me, as well, little Nephis?"
+      ],
+      "round": 3
+    }
+  }
+}

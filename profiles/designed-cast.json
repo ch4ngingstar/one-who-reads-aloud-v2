@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "purpose": "Designed voices chosen on the casting page (pack d23ad41a6a873137, 2026-11-25). Each entry copies a Qwen3-TTS VoiceDesign candidate from data/voice-design into src/data/voices/editions with its exact script, then points the speaker at it. Additive: no existing voice file is modified.",
+  "voices": {
+    "Nephis": {"source": "nephis/cand_2", "why": "Picked over the current voice on the casting page."},
+    "Anvil": {"source": "anvil/cand_1", "why": "Picked over the current Lord Valor clip; Lord Valor's own registration is left as it was."},
+    "Aether": {"source": "anvil/cand_2", "why": "User loved this voice for a major post-2300 character; Aether (House of Night) speaks 'quiet and reserved' across ~33 chapters."},
+    "Madoc": {"source": "anvil/cand_3", "why": "User loved this voice for a major post-2300 character; Madoc, Mordret's uncle and conglomerate head, appears in ~24 chapters from 2483."},
+    "Lonesome Howl": {"source": "morgan/cand_2", "why": "User loved this voice for a major post-2300 character; Seishan's sister, who speaks 'in a low tone', chapters 2781-2818."}
+  }
+}

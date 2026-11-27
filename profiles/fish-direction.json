@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "purpose": "Fish S2 Pro delivery cues, prepended to a character line as an inline [bracket] instruction according to the line's emotion label. An empty string means plain delivery. Edit freely: changing a cue re-records only the lines that use it.",
+  "decided_by": "Owner's blind vote 2026-11-25 (pack 1db9fde846c619f385e75d41, 2 real lines per emotion, plain vs cued at the same seed). Rule: a cue stays on only if it won more comparisons than it lost. Cues that change texture (laugh, whisper, flat coldness) helped; intensity cues (angry, desperate, sarcastic, excited) over-acted.",
+  "cues": {
+    "neutral": "",
+    "whispers": "[whispering]",
+    "angry": "",
+    "sad": "",
+    "excited": "",
+    "commanding": "[commanding, authoritative tone]",
+    "frightened": "",
+    "confused": "",
+    "pleading": "",
+    "cold": "[cold, flat tone]",
+    "laughing": "[laughing]",
+    "sarcastic": "",
+    "desperate": ""
+  },
+  "voted_off": {
+    "angry": {"cue": "[angry]", "result": "plain won 2/2"},
+    "desperate": {"cue": "[desperate]", "result": "plain won 1, tie 1 (owner: plain 'a lot better')"},
+    "sarcastic": {"cue": "[sarcastic]", "result": "plain won 1, tie 1 (owner: plain 'a lot better')"},
+    "confused": {"cue": "[confused]", "result": "plain won 1, tie 1"},
+    "sad": {"cue": "[sad]", "result": "plain won 1, tie 1"},
+    "excited": {"cue": "[excited]", "result": "plain won 1, neither 1"},
+    "frightened": {"cue": "[frightened]", "result": "split 1-1 (plain for Sunny, cue for Rain)"},
+    "pleading": {"cue": "[pleading]", "result": "untested: no principal-cast line labelled pleading"}
+  }
+}

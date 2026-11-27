@@ -1,0 +1,5 @@
+{
+  "name": "OmniVoice for narrator and characters",
+  "narrator": "models/omnivoice-runtime/checkpoints",
+  "characters": "models/omnivoice-runtime/checkpoints"
+}

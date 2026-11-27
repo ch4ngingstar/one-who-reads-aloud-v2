@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Character casting</title>
+<style>
+  :root { color-scheme: dark; font: 16px/1.55 system-ui, sans-serif; background: #14181c; color: #eceeea; }
+  * { box-sizing: border-box; }
+  body { max-width: 1040px; margin: 2.5rem auto; padding: 0 1rem 3rem; }
+  h1 { font-size: clamp(1.8rem, 5vw, 2.6rem); line-height: 1.1; margin-bottom: .4rem; }
+  h2 { margin: 0 0 .4rem; font-size: 1.5rem; }
+  p { max-width: 75ch; }
+  .actions { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: .6rem; align-items: center;
+             padding: .8rem 0; background: #14181c; border-bottom: 1px solid #2e3a40; }
+  button { cursor: pointer; color: inherit; font: inherit; border: 1px solid #647477; border-radius: .4rem;
+           padding: .35rem .7rem; background: #151e22; }
+  button.primary { background: #c6e7d2; color: #142721; font-weight: 650; border-color: #c6e7d2; }
+  :focus-visible { outline: 2px solid #c6e7d2; outline-offset: 2px; }
+  section { margin: 1.6rem 0; border: 1px solid #52636b; border-radius: .7rem; background: #1d252a; padding: 1.2rem; }
+  .brief, .evidence { color: #c3cbc8; font-size: .93rem; margin: .25rem 0; }
+  details { margin: .5rem 0 1rem; color: #c3cbc8; font-size: .93rem; }
+  .option { border-top: 1px solid #33434a; padding: .8rem 0; }
+  .pick { display: inline-flex; gap: .5rem; align-items: center; font-weight: 650; cursor: pointer; }
+  .pick input { width: 1.1rem; height: 1.1rem; accent-color: #c6e7d2; }
+  .pick.none { margin-top: .6rem; font-weight: 500; color: #c3cbc8; }
+  .clips { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); gap: .6rem; margin-top: .5rem; }
+  .clip span { font-size: .8rem; color: #9fb0ad; text-transform: uppercase; letter-spacing: .04em; }
+  audio { width: 100%; display: block; margin-top: .2rem; }
+  .notes { display: block; margin-top: .8rem; font-size: .93rem; }
+  textarea { width: 100%; color: inherit; font: inherit; background: #151e22; border: 1px solid #647477; border-radius: .4rem; padding: .4rem; }
+  #status { color: #c6e7d2; }
+</style>
+</head>
+<body data-pack="__PACK__">
+<h1>Character casting</h1>
+<p>Each character has their current voice and several new voices designed from how the novel describes them. Every option reads the same two lines from the book, loudness-matched. Pick the one that sounds most like the character to you, or "None of these". Then press <strong>Download choices</strong> and send me the file.</p>
+<div class="actions">
+  <button type="button" class="primary" id="download">Download choices</button>
+  <span id="progress"></span>
+  <span id="status" role="status"></span>
+</div>
+<form id="cast">
+__SECTIONS__
+</form>
+<script>
+  const form = document.querySelector("#cast");
+  const pack = document.body.dataset.pack;
+  const key = "voice-casting:" + pack;
+  const sections = [...form.querySelectorAll("section")];
+  const status = document.querySelector("#status");
+
+  function snapshot() {
+    const picks = {};
+    for (const s of sections) {
+      const name = s.dataset.character;
+      const chosen = s.querySelector('input[type=radio]:checked');
+      picks[name] = { pick: chosen ? chosen.value : "", notes: s.querySelector("textarea").value };
+    }
+    return { version: 1, pack, saved_at: new Date().toISOString(), picks };
+  }
+  function progress() {
+    const done = sections.filter(s => s.querySelector('input[type=radio]:checked')).length;
+    document.querySelector("#progress").textContent = done + " of " + sections.length + " characters picked";
+  }
+  function save() {
+    progress();
+    try { localStorage.setItem(key, JSON.stringify(snapshot())); status.textContent = "Saved in this browser."; }
+    catch { status.textContent = "Download a copy to keep your picks."; }
+  }
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || "null");
+    if (saved && saved.pack === pack) {
+      for (const s of sections) {
+        const entry = saved.picks[s.dataset.character];
+        if (!entry) continue;
+        const radio = [...s.querySelectorAll('input[type=radio]')].find(r => r.value === entry.pick);
+        if (radio) radio.checked = true;
+        s.querySelector("textarea").value = entry.notes || "";
+      }
+      status.textContent = "Restored your earlier picks.";
+    }
+  } catch {}
+  progress();
+  form.addEventListener("change", save);
+  form.addEventListener("input", save);
+  document.addEventListener("play", e => {
+    if (e.target.tagName !== "AUDIO") return;
+    for (const a of document.querySelectorAll("audio")) if (a !== e.target) a.pause();
+  }, true);
+  document.querySelector("#download").addEventListener("click", () => {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot(), null, 2)], {type: "application/json"}));
+    const link = document.createElement("a");
+    link.href = url; link.download = "voice-casting-" + pack + ".json"; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+</script>
+</body>
+</html>
