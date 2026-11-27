@@ -17,7 +17,36 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
+// ── Audiobook export (.m4b with chapter markers) ──────────────────────────────
+
+export interface AudiobookJob {
+  state: 'idle' | 'running' | 'done' | 'error'
+  project: number
+  file?: string
+  chapters?: number
+  missing?: number
+  hours?: number
+  error?: string
+}
+
+export function startAudiobookExport(projectId: number): Promise<AudiobookJob> {
+  return req(`/projects/${projectId}/audiobook`, { method: 'POST' })
+}
+
+export function getAudiobookExport(projectId: number): Promise<AudiobookJob> {
+  return req(`/projects/${projectId}/audiobook`)
+}
+
+export function audiobookFileUrl(projectId: number): string {
+  return `${BASE}/projects/${projectId}/audiobook/file`
+}
+
 // ── Project ───────────────────────────────────────────────────────────────────
+
+export type LocalModels = { tts: { name: string; path: string }[]; llm: string[] }
+export function getLocalModels(): Promise<LocalModels> {
+  return req('/models/local')
+}
 
 export async function createProject(params: {
   epub_path: string
@@ -56,12 +85,24 @@ export async function getLines(
 
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 
+/** The labeller's speaker is right: clear the review flag without re-recording the line. */
+export function confirmSpeaker(chapterId: number, lineIndex: number) {
+  return req(`/chapters/${chapterId}/lines/${lineIndex}/confirm`, { method: 'POST' })
+}
+
+export function queueRecording(chapterId: number, lineIndex?: number, speaker?: string, reading?: string) {
+  const query = lineIndex == null ? '' : `?line_index=${lineIndex}${speaker ? '&speaker=' + encodeURIComponent(speaker) : ''}`
+  return req(`/chapters/${chapterId}/record${query}`, { method: 'POST', body: reading === undefined ? undefined : JSON.stringify({ reading }) })
+}
+
 export async function startPipeline(params: {
   project_name: string
   llm_model_path: string
   tts_model_dir: string
   speakers?: string[]
   chapter_range?: [number, number] | null
+  /** Real chapter numbers [first, last]; the server maps them to positions. */
+  chapter_numbers?: [number, number] | null
   output_format?: string
   vram_check_enabled?: boolean
   sfx_enabled?: boolean
@@ -87,6 +128,14 @@ export async function getPipelineStatus(): Promise<PipelineStatusResponse> {
 }
 
 // ── Voices ────────────────────────────────────────────────────────────────────
+
+export function getPronunciations(): Promise<Record<string, string>> {
+  return req('/pronunciations')
+}
+
+export function setPronunciation(spelling: string, reading: string): Promise<Record<string, string>> {
+  return req('/pronunciations', { method: 'PUT', body: JSON.stringify({ spelling, reading }) })
+}
 
 export async function getVoices(): Promise<{ voices: Voice[] }> {
   return req('/voices')
@@ -127,8 +176,8 @@ export async function deleteChapterAudio(
   return req(`/chapters/${chapterId}/audio`, { method: 'DELETE' })
 }
 
-export async function resetChapter(chapterId: number): Promise<{ reset: number }> {
-  return req(`/chapters/${chapterId}/reset`, { method: 'POST' })
+export async function resetChapter(chapterId: number, retry = false): Promise<{ reset: number }> {
+  return req(`/chapters/${chapterId}/reset${retry ? '?retry=true' : ''}`, { method: 'POST' })
 }
 
 // ── External diarization import ────────────────────────────────────────────────

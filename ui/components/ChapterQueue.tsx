@@ -2,9 +2,10 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import ConfirmButton from '@/components/ConfirmButton'
 import { deleteChapterAudio, resetChapter } from '@/lib/api'
-import { formatMB, parseChapterError } from '@/lib/format'
+import { chapterName, chapterNumberLabel, formatMB, parseChapterError } from '@/lib/format'
 import type { Chapter, ChapterStatus } from '@/lib/types'
 import type { Stage } from '@/hooks/usePipelineState'
+import AudiobookExport from '@/components/AudiobookExport'
 
 type Filter = 'all' | 'pending' | 'complete' | 'failed'
 const RENDER_CHUNK = 120
@@ -44,7 +45,7 @@ const QueueRow = memo(function QueueRow({
   chapter, isRunning, activeStage, ttsProg, selected, isPlaying, playerPlaying,
   onSelect, onPlay, onChanged,
 }: RowProps) {
-  const num = String(chapter.chapter_index + 1)
+  const num = chapterNumberLabel(chapter)
   const failed = chapter.status === 'error'
   const complete = chapter.status === 'complete'
 
@@ -61,7 +62,7 @@ const QueueRow = memo(function QueueRow({
         <span className="flex-none text-[11px] leading-none text-ink-hot animate-breathe [text-shadow:0_0_12px_rgba(255,255,255,0.7)]" aria-hidden>✦</span>
         <div className="flex-1 min-w-0">
           <div className="font-display text-[14.5px] tracking-[1.5px] text-ink-hot truncate [text-shadow:0_0_14px_rgba(255,255,255,0.3)]">
-            {chapter.title}
+            {chapterName(chapter)}
           </div>
           <div className="flex items-center gap-2 mt-1 text-[10.5px] text-spell-g7">
             <span className="equalizer" aria-hidden><span /><span /><span /></span>
@@ -99,7 +100,7 @@ const QueueRow = memo(function QueueRow({
         <div className={`font-medium truncate ${
           failed ? 'text-blood-text' : complete ? 'text-ink-primary' : 'text-ink-secondary'
         }`}>
-          {chapter.title}
+          {chapterName(chapter)}
         </div>
         <div className={`text-[10.5px] mt-px truncate ${failed ? 'text-[#8d4a51]' : 'text-spell-g6'}`}>
           {failed && err
@@ -119,7 +120,7 @@ const QueueRow = memo(function QueueRow({
       )}
 
       <div className="hidden group-hover:flex gap-1.5 flex-none" onClick={e => e.stopPropagation()}>
-        {complete && chapter.output_audio_path != null && (
+        {chapter.output_audio_path != null && (
           <button
             className="btn !p-0 w-[27px] h-[27px] text-[11px]"
             onClick={() => onPlay(chapter.id)}
@@ -132,9 +133,9 @@ const QueueRow = memo(function QueueRow({
             className="btn !p-0 w-[27px] h-[27px] text-[11px]"
             confirmClassName="btn !px-2 h-[27px] text-[9px]"
             confirmLabel={failed ? 'Retry?' : 'Redo?'}
-            onConfirm={async () => { await resetChapter(chapter.id); onChanged() }}
+            onConfirm={async () => { await resetChapter(chapter.id, failed); onChanged() }}
             ariaLabel={failed ? `Retry chapter ${num}` : `Redo chapter ${num}`}
-            title="Reset and re-run this chapter"
+            title={failed ? 'Queue the failed stage and keep finished takes' : 'Reset and re-run this chapter'}
           >↻</ConfirmButton>
         )}
         {complete && (
@@ -164,11 +165,13 @@ interface Props {
   onPlay: (id: number) => void
   /** Fired after retry/redo/delete so the page refetches chapters. */
   onChanged: () => void
+  /** The selected book; enables the one-click .m4b export. */
+  projectId?: number | null
 }
 
 export default function ChapterQueue({
   chapters, activeChapterId, activeStage, ttsProgress, selectedId, onSelect,
-  playingChapterId, playerPlaying, onPlay, onChanged,
+  playingChapterId, playerPlaying, onPlay, onChanged, projectId = null,
 }: Props) {
   const [filter, setFilter] = useState<Filter>('all')
   const [query,  setQuery]  = useState('')
@@ -176,21 +179,24 @@ export default function ChapterQueue({
   const sentinelRef = useRef<HTMLDivElement>(null)
 
   const counts = useMemo(() => {
-    let complete = 0, failed = 0
+    let complete = 0, failed = 0, all = 0
     for (const c of chapters) {
+      if (c.kind === 'back') continue   // contents pages are never narrated
+      all++
       if (c.status === 'complete') complete++
       else if (c.status === 'error') failed++
     }
-    return { all: chapters.length, complete, failed, pending: chapters.length - complete - failed }
+    return { all, complete, failed, pending: all - complete - failed }
   }, [chapters])
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
     return chapters.filter(c => {
+      if (c.kind === 'back') return false
       if (filter === 'complete' && c.status !== 'complete') return false
       if (filter === 'failed'   && c.status !== 'error')    return false
       if (filter === 'pending'  && (c.status === 'complete' || c.status === 'error')) return false
-      if (q && !c.title.toLowerCase().includes(q) && !String(c.chapter_index + 1).includes(q)) return false
+      if (q && !chapterName(c).toLowerCase().includes(q) && !chapterNumberLabel(c).includes(q)) return false
       return true
     })
   }, [chapters, filter, query])
@@ -236,6 +242,12 @@ export default function ChapterQueue({
           onChange={e => setQuery(e.target.value)}
         />
       </div>
+
+      {projectId != null && (
+        <div className="flex items-center px-[15px] py-[8px] border-b border-[#1a1a1a]">
+          <AudiobookExport projectId={projectId} finished={counts.complete} />
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto p-[13px] flex flex-col gap-[7px]">
         {visible.length === 0 ? (

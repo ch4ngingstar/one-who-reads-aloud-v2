@@ -10,8 +10,8 @@ VRAM LIFECYCLE ENFORCED HERE (STAGE-BATCHED):
     0. Baseline snapshot     [ VRAM held by desktop apps before the LLM loads ]
     1. LLMDirector context  [ loads ~8.5GB ] → diarize EVERY chapter → [ purge ]
     2. VRAM barrier check   [ waits until usage returns to ~baseline before TTS ]
-    3. TTSEngine context     [ IndexTTS2 ~8GB ] → synthesize EVERY chapter → [ unload ]
-    4. AudioAssembler.assemble_chapter()  for every chapter [ CPU only, 0 VRAM ]
+    3. TTSEngine context     [ one resident speech model per batch ]
+    4. For each chapter, synthesize and publish its CPU-assembled audio immediately.
 
   This collapses the per-chapter load/unload/barrier tax (paid N times in the
   old chapter-at-a-time loop) to once per sub-batch. Per-chunk LLM calls are
@@ -57,12 +57,16 @@ from typing import Callable, Optional
 from epub_parser    import parse_epub
 from state_manager  import StateManager
 from llm_director   import LLMDirector, DEFAULT_SPEAKERS
-from tts_engine     import TTSEngine
+from label_director import LabelDirector
+from recording_room import RecordingRoom
 from audio_assembler import AudioAssembler
 
 
 # ── Stage routing (what to run given current chapter status) ──────────────────
 _ALL_STAGES = ["diarize", "synthesize", "assemble"]
+
+class _StopAtLine(Exception):
+    """The current take has been checkpointed and can be resumed."""
 
 _STAGES_FOR_STATUS = {
     "pending":   _ALL_STAGES,
@@ -114,7 +118,7 @@ class PipelineConfig:
 
     # Assembly
     output_format:        str   = "mp3"
-    min_lines_threshold:  float = 0.5
+    min_lines_threshold:  float = 1.0
     # Sound design (opt-in, CPU-only): layer ambience/sfx/music under the voice
     # when a chapter has cues. Off => assembly is identical to before.
     sfx_enabled:          bool = False
@@ -170,8 +174,10 @@ class PipelineOrchestrator:
         config: PipelineConfig,
         progress_callback: "Callable[[dict], None] | None" = None,
         # Injectable for tests
-        llm_director_cls=LLMDirector,
-        tts_engine_cls=TTSEngine,
+        # Qwen labels + Gemma second opinion (98.4% on agreed lines, measured on
+        # unseen chapters). LLMDirector remains available for injection.
+        llm_director_cls=LabelDirector,
+        tts_engine_cls=RecordingRoom,
         assembler_cls=AudioAssembler,
         epub_parser_fn=parse_epub,
     ):
@@ -298,7 +304,8 @@ class PipelineOrchestrator:
         self._project_id = self.sm.seed_project(parsed)
 
     def _chapters_to_process(self) -> list:
-        chapters = self.sm.get_all_chapters(self._project_id)
+        # Contents/credits pages ("Content from Chapter 1841 ... eBook from 9Kafe") are never narrated.
+        chapters = [c for c in self.sm.get_all_chapters(self._project_id) if c.get("kind") != "back"]
         r = self.cfg.chapter_range
         if r:
             start, end = r
@@ -309,6 +316,20 @@ class PipelineOrchestrator:
     def _stages_for_chapter(self, chapter: dict) -> list:
         """Return stages to run based on status; error chapters resume from the failed stage."""
         status = chapter["status"]
+        if (status == "diarized" and getattr(self._llm_cls, "relabels_old_labels", False)
+                and not self.sm.has_current_labels(chapter["id"])):
+            # Labelled by an older system (about 60% right on volumes 8-9, and
+            # missing text): relabel before recording.
+            return list(_ALL_STAGES)
+        if status in {"tts_done", "diarized"} or (
+            status == "error" and any(tag in (chapter.get("error_message") or "") for tag in
+                                      ("[failed_stage:synthesize]", "[failed_stage:assemble]"))
+        ):
+            if self.sm.repair_render_inputs(chapter["id"]):
+                return list(_ALL_STAGES[1:])
+            score = Path(self.cfg.audio_wav_dir) / f"ch_{chapter['id']:04d}" / "score.json"
+            if self._tts_cls is RecordingRoom and score.exists():
+                return list(_ALL_STAGES[1:])  # revalidate cast/renderer before reusing takes
         if status != "error":
             return list(_STAGES_FOR_STATUS.get(status, []))
         msg = chapter.get("error_message") or ""
@@ -362,6 +383,14 @@ class PipelineOrchestrator:
                             p.elapsed += self._stage_diarize(director, p.chapter["id"])
                         except Exception as exc:
                             self._fail_chapter(p, "diarize", exc, results)
+                    # A director may finish the batch as a whole (the second-opinion
+                    # model checks every chapter, then each is stored).
+                    finish = getattr(director, "finish", None)
+                    if callable(finish):
+                        failures = finish() or {}
+                        for p in diarize:
+                            if p.chapter["id"] in failures and not p.errored:
+                                self._fail_chapter(p, "diarize", failures[p.chapter["id"]], results)
             except Exception as exc:
                 # The model load itself failed — every chapter in this phase is
                 # blocked. Mark them all so the batch doesn't silently stall.
@@ -384,9 +413,9 @@ class PipelineOrchestrator:
                     self.cfg.audio_wav_dir,
                     model_dir=self.cfg.tts_model_dir,
                 ) as engine:
-                    self._emit("model_load", model="tts",
-                               chapters=len(synth),
-                               elapsed_s=round(time.time() - load_t0, 1))
+                    if not isinstance(engine, RecordingRoom):
+                        self._emit("model_load", model="tts", chapters=len(synth),
+                                   elapsed_s=round(time.time() - load_t0, 1))
                     for p in synth:
                         self._pause_event.wait()
                         if not self._stop_event.is_set():
@@ -394,25 +423,32 @@ class PipelineOrchestrator:
                         self._ensure_started(p)
                         try:
                             p.elapsed += self._stage_synthesize(engine, p.chapter["id"])
+                        except _StopAtLine:
+                            return
                         except Exception as exc:
                             self._fail_chapter(p, "synthesize", exc, results)
+                            continue
+                        self._assemble_and_finish(p, results)
             except Exception as exc:
                 for p in synth:
-                    if not p.errored:
+                    if not p.errored and self.sm.get_chapter_by_id(p.chapter["id"])["status"] != "complete":
                         self._fail_chapter(p, "synthesize", exc, results)
 
-        # ── Phase 3: assemble on CPU (no model resident in VRAM) ─────────────
-        assemble = [p for p in batch if "assemble" in p.stages and not p.errored]
+        # Resumed chapters whose WAVs were already complete need no model.
+        assemble = [p for p in batch if p.stages == ["assemble"]]
         for p in assemble:
             self._pause_event.wait()
             if not self._stop_event.is_set():
                 break
             self._ensure_started(p)
-            try:
-                p.elapsed += self._stage_assemble(p.chapter["id"])
-                self._complete_chapter(p, results)
-            except Exception as exc:
-                self._fail_chapter(p, "assemble", exc, results)
+            self._assemble_and_finish(p, results)
+
+    def _assemble_and_finish(self, p, results):
+        try:
+            p.elapsed += self._stage_assemble(p.chapter["id"])
+            self._complete_chapter(p, results)
+        except Exception as exc:
+            self._fail_chapter(p, "assemble", exc, results)
 
     # ── Per-chapter lifecycle helpers ─────────────────────────────────────────
 
@@ -475,18 +511,39 @@ class PipelineOrchestrator:
         self._current_stage = "synthesize"
         t0 = time.time()
         self._emit("stage_start", chapter_id=chapter_id, stage="synthesize")
+        remaining = (self.sm.get_lines_for_chapter(chapter_id) if isinstance(engine, RecordingRoom)
+                     else self.sm.get_pending_tts_lines(chapter_id))
+        total_chars = sum(len(row["text"]) for row in remaining)
+        processed_chars = 0
+        started = time.monotonic()
 
         def _tts_progress(lines_done: int, lines_total: int, line: dict) -> None:
+            nonlocal processed_chars, started
             line = dict(line)  # sqlite3.Row compat
+            processed_chars += len(line.get("text") or "")
+            estimate = None
+            if lines_done >= 2 and processed_chars:
+                estimate = round((time.monotonic() - started) * max(0, total_chars - processed_chars)
+                                 / processed_chars)
             self._emit("tts_progress",
                        chapter_id=chapter_id,
                        lines_done=lines_done,
                        lines_total=lines_total,
+                       speech_eta_s=estimate,
                        text=_truncate_live_text(line.get("text")),
                        speaker=line.get("speaker"),
                        emotion=line.get("emotion"))
+            if lines_done < lines_total:
+                paused_at = time.monotonic()
+                self._pause_event.wait()
+                started += time.monotonic() - paused_at
+                if self.stopped:
+                    raise _StopAtLine()
 
         engine.process_chapter(chapter_id, progress_callback=_tts_progress)
+        chapter = self.sm.get_chapter_by_id(chapter_id)
+        if chapter["status"] == "error":
+            raise RuntimeError((chapter["error_message"] or "").removeprefix("[failed_stage:synthesize] "))
 
         elapsed = round(time.time() - t0, 1)
         self._emit("stage_done", chapter_id=chapter_id, stage="synthesize",
@@ -510,6 +567,7 @@ class PipelineOrchestrator:
                 "sfx_enabled":          self.cfg.sfx_enabled,
                 "sfx_categories":       self.cfg.sfx_categories,
                 "sfx_dir":              self.cfg.sfx_dir,
+                "score_path":           str(Path(self.cfg.audio_wav_dir) / f"ch_{chapter_id:04d}" / "score.json"),
             },
         )
         asm.assemble_chapter(chapter_id)

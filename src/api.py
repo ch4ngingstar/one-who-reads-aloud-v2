@@ -28,9 +28,11 @@ DATA FLOW into Module 8 (Next.js):
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import tempfile
@@ -71,7 +73,9 @@ class PipelineStart(BaseModel):
     tts_model_dir:      str = ""   # IndexTTS2 checkpoints dir
     fish_speech_dir:    str = ""   # deprecated alias for tts_model_dir
     speakers:           list[str] = []
-    chapter_range:      Optional[list[int]] = None   # [start, end] inclusive
+    chapter_range:      Optional[list[int]] = None   # [start, end] inclusive positions
+    # Real chapter numbers as printed in the book ([1990, 1999]); wins over chapter_range.
+    chapter_numbers:    Optional[list[int]] = None
     output_format:      str   = "mp3"
     vram_check_enabled: bool  = True
     batch_size:         int   = 8   # chapters per LLM/TTS load-unload cycle (measured swap tax ~47s/ch, mostly the 40s TTS load)
@@ -87,6 +91,10 @@ class PipelineStart(BaseModel):
 class VoiceSet(BaseModel):
     speaker:        str
     ref_audio_path: str
+
+class Pronunciation(BaseModel):
+    spelling: str
+    reading: str
 
 
 class ChapterResetRange(BaseModel):
@@ -291,12 +299,11 @@ def _normalize_voice_clip(raw_bytes: bytes, dest: Path) -> bool:
     so the cleanest, highest-fidelity clip yields the best clone. We only force
     mono (IndexTTS2 expects a mono reference) and a consistent WAV container.
 
-    Returns True on success.  Callers should fall back to saving raw_bytes if
-    this returns False (ffmpeg unavailable / non-fatal encoding error).
+    Returns True on successful decode.
     """
     with tempfile.NamedTemporaryFile(suffix=".tmp", delete=False) as tmp:
         tmp_path = Path(tmp.name)
-        tmp_path.write_bytes(raw_bytes)
+        tmp.write(raw_bytes)
     try:
         result = subprocess.run(
             [
@@ -388,6 +395,13 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/api/models/local")
+def local_models():
+    """Installed checkpoint choices for the setup form, in preference order."""
+    from installed_models import installed_models
+    return installed_models(_ROOT_DIR)
+
+
 # ── Project ───────────────────────────────────────────────────────────────────
 
 @app.post("/api/project", status_code=201)
@@ -397,9 +411,20 @@ async def create_project(
 ):
     """Parse the EPUB and seed the database. Does not start the pipeline."""
     epub_path = Path(req.epub_path)
+    existing = sm.get_project(epub_path.stem)
+    if existing:
+        return {"project_id": existing["id"], "project": existing, "progress": sm.get_progress(existing["id"])}
     if not epub_path.exists():
         raise HTTPException(status_code=400,
                             detail=f"EPUB not found: {req.epub_path}")
+
+    # The labeller re-reads chapters from data/input/<name>.epub (the complete text),
+    # so a book chosen from anywhere on disk is kept there too.
+    from book_text import EPUB_DIR
+    library_copy = EPUB_DIR / epub_path.name
+    if not library_copy.exists():
+        EPUB_DIR.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(shutil.copy2, epub_path, library_copy)
 
     # Parsing is CPU-heavy (spaCy over hundreds of chapters) — keep it off the
     # event loop so /api/health and SSE heartbeats stay responsive.
@@ -430,6 +455,20 @@ async def get_project(
 
 # ── Pipeline control ──────────────────────────────────────────────────────────
 
+def _positions_for_numbers(sm: StateManager, project_id: int, numbers: list[int]) -> list[int]:
+    """Map real chapter numbers ([1990, 1999]) to the inclusive position range the pipeline uses."""
+    if len(numbers) != 2 or numbers[0] > numbers[1]:
+        raise HTTPException(status_code=400, detail="chapter_numbers must be [first, last] with first <= last")
+    chapters = sm.get_all_chapters(project_id)
+    hits = [c["chapter_index"] for c in chapters
+            if c.get("chapter_number") is not None and numbers[0] <= c["chapter_number"] <= numbers[1]]
+    if not hits:
+        known = [c["chapter_number"] for c in chapters if c.get("chapter_number") is not None]
+        span = f" (this book has chapters {min(known)}-{max(known)})" if known else ""
+        raise HTTPException(status_code=400, detail=f"No chapters numbered {numbers[0]}-{numbers[1]}{span}.")
+    return [min(hits), max(hits)]
+
+
 @app.post("/api/pipeline/start")
 async def start_pipeline(
     req: PipelineStart,
@@ -443,6 +482,8 @@ async def start_pipeline(
             detail=f"Project '{req.project_name}' not found. Call POST /api/project first."
         )
 
+    if req.chapter_numbers:
+        req.chapter_range = _positions_for_numbers(sm, project["id"], req.chapter_numbers)
     if req.chapter_range:
         if len(req.chapter_range) != 2:
             raise HTTPException(status_code=400,
@@ -465,12 +506,12 @@ async def start_pipeline(
     if not model_dir:
         raise HTTPException(
             status_code=400,
-            detail="tts_model_dir is required (the IndexTTS2 checkpoints directory)."
+            detail="Choose an installed speech renderer or enter its checkpoints directory."
         )
 
     config = PipelineConfig(
         epub_path         = project["source_epub"],
-        llm_model_path    = req.llm_model_path,
+        llm_model_path    = str(_resolve_data_path(req.llm_model_path)),
         tts_model_dir     = model_dir,
         db_path           = str(_DATA_DIR / "pipeline.db"),
         audio_wav_dir     = str(_AUDIO_WAV_DIR),
@@ -604,6 +645,7 @@ async def reset_chapters_range(
                 if p.exists():
                     try:
                         p.unlink()
+                        p.with_suffix(".performance.json").unlink(missing_ok=True)
                     except OSError:
                         pass
             reset_ids.append(ch["id"])
@@ -618,7 +660,60 @@ async def list_chapter_lines(
 ):
     """All diarized lines for a chapter (speaker, text, emotion, status, audio_path)."""
     lines = sm.get_lines_for_chapter(chapter_id)
+    from spoken_text import spoken_reading
+    pronunciations = sm.get_pronunciations()
+    for line in lines:
+        line["spoken_text"] = spoken_reading(line["text"], line.get("spoken_override"), pronunciations)
+    chapter = sm.get_chapter_by_id(chapter_id)
+    if chapter and chapter.get("output_audio_path"):
+        audio = _resolve_data_path(chapter["output_audio_path"])
+        sheet = audio.with_suffix(".performance.json")
+        try:
+            edition = json.loads(sheet.read_text(encoding="utf-8")) if sheet.is_file() else {}
+            if edition and "master_bytes" in edition and audio.stat().st_size != edition["master_bytes"]:
+                edition = {}
+        except (ValueError, OSError):
+            edition = {}
+        if edition.get("cues"):
+            cues = {cue["index"]: cue for cue in edition["cues"]}
+            for line in lines:
+                cue = cues.get(line["line_index"])
+                if cue and cue["source"] == line["text"]:
+                    line["performance"] = {"start_ms": cue["start_ms"], "end_ms": cue["end_ms"],
+                                           "renderer": cue.get("renderer", edition["renderer"]),
+                                           "audit": cue.get("audit", {}), "fallback": cue["fallback"]}
     return {"lines": lines, "total": len(lines)}
+
+
+class ReadingEdit(BaseModel):
+    reading: str
+
+
+@app.post("/api/chapters/{chapter_id}/record")
+def queue_existing_script(chapter_id: int, line_index: int | None = None, speaker: str | None = None,
+                          edit: ReadingEdit | None = None,
+                          sm: StateManager = Depends(get_sm), mgr: PipelineManager = Depends(get_manager)):
+    if mgr.status in ("running", "paused") or (mgr.thread and mgr.thread.is_alive()):
+        raise HTTPException(409, "Finish or stop the current run before queuing a recording.")
+    try:
+        if speaker is not None and (line_index is None or speaker not in sm.get_voice_map()):
+            raise HTTPException(422, "Choose a registered voice and a line to recast.")
+        if edit and (line_index is None or len(edit.reading) > 10000):
+            raise HTTPException(422, "Choose a line and keep the reading under 10,001 characters.")
+        sm.queue_recording(chapter_id, line_index, speaker, edit.reading.strip() if edit else None)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"queued": chapter_id, "line_index": line_index}
+
+
+@app.post("/api/chapters/{chapter_id}/lines/{line_index}/confirm")
+def confirm_line_speaker(chapter_id: int, line_index: int, sm: StateManager = Depends(get_sm)):
+    """Mark a flagged line's speaker as correct without re-recording it."""
+    try:
+        sm.confirm_speaker(chapter_id, line_index)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"confirmed": chapter_id, "line_index": line_index}
 
 
 @app.get("/api/chapters/{chapter_id}/segments")
@@ -809,6 +904,7 @@ async def delete_chapter_audio(
         p = _resolve_data_path(audio_path)
         if p.exists():
             p.unlink()
+            p.with_suffix(".performance.json").unlink(missing_ok=True)
     sm.delete_chapter_audio(chapter_id)
     return {"deleted": chapter_id, "file": audio_path}
 
@@ -816,6 +912,7 @@ async def delete_chapter_audio(
 @app.post("/api/chapters/{chapter_id}/reset")
 async def reset_chapter(
     chapter_id: int,
+    retry: bool = False,
     sm: StateManager = Depends(get_sm),
 ):
     """Reset a chapter to pending so the pipeline will re-process it.
@@ -827,6 +924,10 @@ async def reset_chapter(
     if not row:
         raise HTTPException(status_code=404, detail="Chapter not found.")
 
+    if retry:
+        if not sm.queue_chapter_retry(chapter_id):
+            raise HTTPException(status_code=409, detail="Only a failed chapter can be queued for retry.")
+        return {"reset": chapter_id}
     ok = sm.reset_chapter_to_pending(chapter_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Chapter not found.")
@@ -836,12 +937,26 @@ async def reset_chapter(
         if p.exists():
             try:
                 p.unlink()
+                p.with_suffix(".performance.json").unlink(missing_ok=True)
             except OSError:
                 pass  # file locked (e.g. playing) — DB is already reset
     return {"reset": chapter_id}
 
 
 # ── Voices ────────────────────────────────────────────────────────────────────
+
+@app.get("/api/pronunciations")
+def list_pronunciations(sm: StateManager = Depends(get_sm)):
+    return sm.get_pronunciations()
+
+
+@app.put("/api/pronunciations")
+def edit_pronunciation(rule: Pronunciation, sm: StateManager = Depends(get_sm)):
+    spelling, reading = rule.spelling.strip(), rule.reading.strip()
+    if not spelling or len(spelling) > 100 or len(reading) > 150:
+        raise HTTPException(status_code=400, detail="Use a name of 1–100 characters and a reading of up to 150.")
+    sm.set_pronunciation(spelling, reading)
+    return sm.get_pronunciations()
 
 @app.get("/api/voices")
 async def list_voices(sm: StateManager = Depends(get_sm)):
@@ -891,25 +1006,21 @@ async def upload_voice(
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-    # A valid 3-second voice clip at 22050 Hz 16-bit mono is ~132 KB.
-    # Anything under 10 KB is a header or silence with no usable audio.
-    if len(content) < 10_000:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Voice clip is too short ({len(content):,} bytes). "
-                   "Upload at least 3-10 seconds of clean speech.",
-        )
-
     _VOICES_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Transcode to mono 16-bit WAV (preserving sample rate + dynamics) so every
-    # clip is a clean, consistent container for IndexTTS2 to clone from.
-    dest = _VOICES_DIR / f"{slug}.wav"
-    normalized = _normalize_voice_clip(content, dest)
-    if not normalized:
-        # FFmpeg unavailable or failed — save the raw file and carry on.
-        dest = _VOICES_DIR / f"{slug}{ext}"
-        dest.write_bytes(content)
+    from speech_audio import check_pcm
+    digest = hashlib.sha256(content).hexdigest()[:16]
+    dest = _VOICES_DIR / f"{slug}-{digest}.wav"
+    with tempfile.TemporaryDirectory(dir=_VOICES_DIR) as tmp:
+        candidate = Path(tmp) / "reference.wav"
+        if not _normalize_voice_clip(content, candidate):
+            raise HTTPException(status_code=400, detail="FFmpeg could not decode this voice clip.")
+        try:
+            seconds = check_pcm(candidate.read_bytes())
+            if seconds < 3:
+                raise ValueError(f"The clip is {seconds:.1f}s long. Upload at least 3 seconds of clean speech.")
+        except (ValueError, EOFError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        candidate.replace(dest)
 
     sm.set_voice(speaker, str(dest))
     return {"speaker": speaker, "ref_audio_path": str(dest)}
@@ -1070,6 +1181,39 @@ async def serve_audio(
 
     raise HTTPException(status_code=404,
                         detail=f"Audio for chapter {chapter_id} not yet generated.")
+
+
+# ── Audiobook export (.m4b) ───────────────────────────────────────────────────
+
+def get_exports():
+    from book_export import BookExports
+    if getattr(app.state, "exports", None) is None:
+        app.state.exports = BookExports(_AUDIO_MP3_DIR / "books")
+    return app.state.exports
+
+
+@app.post("/api/projects/{project_id}/audiobook", status_code=202)
+def start_audiobook_export(project_id: int, sm: StateManager = Depends(get_sm), exports=Depends(get_exports)):
+    """Package the project's finished chapters into one .m4b with chapter markers.
+
+    Runs in the background (a full volume takes minutes); poll the GET route for status.
+    """
+    if not any(p["id"] == project_id for p in sm.list_projects()):
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found.")
+    return exports.start(sm.db_path, project_id)
+
+
+@app.get("/api/projects/{project_id}/audiobook")
+def audiobook_export_status(project_id: int, exports=Depends(get_exports)):
+    return exports.status(project_id)
+
+
+@app.get("/api/projects/{project_id}/audiobook/file")
+def audiobook_export_file(project_id: int, exports=Depends(get_exports)):
+    job = exports.status(project_id)
+    if job.get("state") != "done" or not Path(job.get("file", "")).is_file():
+        raise HTTPException(status_code=404, detail="No finished audiobook export for this project yet.")
+    return FileResponse(job["file"], media_type="audio/mp4", filename=Path(job["file"]).name)
 
 
 # ── SSE event stream ──────────────────────────────────────────────────────────

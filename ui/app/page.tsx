@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   getProject, getChapters, getVoices, listProjects,
-  startPipeline, pausePipeline, resumePipeline, stopPipeline, getPipelineStatus,
+  startPipeline, pausePipeline, resumePipeline, stopPipeline, getPipelineStatus, getLocalModels, queueRecording,
 } from '@/lib/api'
 import { usePipelineState } from '@/hooks/usePipelineState'
 import { formatEta } from '@/lib/format'
@@ -14,6 +14,7 @@ import PlayerBar      from '@/components/PlayerBar'
 import Toasts         from '@/components/Toasts'
 import type { Project, Progress, Chapter, Voice, GenOptions, SfxCategory } from '@/lib/types'
 import { SFX_CATEGORIES } from '@/lib/sfxCatalog'
+import type { LocalModels } from '@/lib/api'
 
 const STORAGE_KEY = 'pipeline_cfg'
 
@@ -22,6 +23,8 @@ interface SavedConfig {
   ttsDir: string; epubPath: string; speakers: string
   outputFormat?: string; vramCheck?: boolean; sfxEnabled?: boolean
   sfxCategories?: SfxCategory[]
+  chapterRange?: [number, number] | null
+  chapterNumbers?: [number, number] | null
   fishDir?: string  // legacy key — migrated to ttsDir on load
 }
 
@@ -38,7 +41,10 @@ export default function CommandDeck() {
   const [llmPath,      setLlmPath]      = useState('')
   const [ttsDir,       setTtsDir]       = useState('')
   const [epubPath,     setEpubPath]     = useState('')
-  const [speakers,     setSpeakers]     = useState('Sunny, Nephis, Cassie, Effie, Kai')
+  const [speakers,     setSpeakers]     = useState('')
+  const [models, setModels] = useState<LocalModels>({ tts: [], llm: [] })
+  const [chapterRange, setChapterRange] = useState<[number, number] | null>(null)   // legacy positions
+  const [chapterNumbers, setChapterNumbers] = useState<[number, number] | null>(null)
   const [outputFormat, setOutputFormat] = useState('mp3')
   const [vramCheck,    setVramCheck]    = useState(true)
   const [sfxEnabled,   setSfxEnabled]   = useState(false)
@@ -85,13 +91,15 @@ export default function CommandDeck() {
     try {
       const { project: p, progress: pr } = await getProject(name)
       setProject(p); setProgress(pr); setSideTab('voices'); setSelectedId(null); fetchChapters(p)
+      setEpubPath(p.source_epub)
+      setChapterRange(null)
       getPipelineStatus().then(s => {
         dispatch({ kind: 'set-status', status: s.status })
         if ((s.status === 'running' || s.status === 'paused') && s.last_event) {
           dispatch({ kind: 'sse', event: s.last_event, now: Date.now() })
         }
       }).catch(() => {})
-      saveCfg({ projectName: name })
+      saveCfg({ projectName: name, epubPath: p.source_epub, chapterRange: null, chapterNumbers: null })
     } catch { /* */ }
   }, [fetchChapters, saveCfg, dispatch])
 
@@ -116,7 +124,14 @@ export default function CommandDeck() {
     if (savedTtsDir && !/fish[-_ ]?speech/i.test(savedTtsDir)) setTtsDir(savedTtsDir)
     if (cfg.epubPath) setEpubPath(cfg.epubPath)
     if (cfg.speakers) setSpeakers(cfg.speakers)
+    getLocalModels().then(found => {
+      setModels(found)
+      setTtsDir(current => current || found.tts[0]?.path || '')
+      setLlmPath(current => current || found.llm[0] || '')
+    }).catch(() => {})
     if (cfg.outputFormat) setOutputFormat(cfg.outputFormat)
+    if (cfg.chapterRange?.length === 2) setChapterRange(cfg.chapterRange)
+    if (cfg.chapterNumbers?.length === 2) setChapterNumbers(cfg.chapterNumbers)
     if (cfg.vramCheck != null) setVramCheck(cfg.vramCheck)
     if (cfg.sfxEnabled != null) setSfxEnabled(cfg.sfxEnabled)
     if (cfg.sfxCategories != null) setSfxCategories(cfg.sfxCategories)
@@ -146,6 +161,8 @@ export default function CommandDeck() {
     const speakerList = speakers.split(',').map(s => s.trim()).filter(Boolean)
     return {
       llm_model_path: llmPath, tts_model_dir: ttsDir,
+      chapter_range: chapterNumbers ? null : chapterRange,
+      chapter_numbers: chapterNumbers,
       speakers: speakerList, output_format: outputFormat,
       vram_check_enabled: vramCheck, sfx_enabled: sfxEnabled,
       sfx_categories: sfxCategories,
@@ -164,6 +181,15 @@ export default function CommandDeck() {
   }
 
   async function handlePause()  { try { await pausePipeline();  dispatch({ kind: 'set-status', status: 'paused'  }) } catch (e) { toast('crimson', e instanceof Error ? e.message : 'Failed to pause')  } }
+
+  async function renderChapter(chapter: Chapter, renderer: string) {
+    if (!project || project.id !== chapter.project_id) throw new Error('Select the book first.')
+    if (chapter.status === 'complete') await queueRecording(chapter.id)
+    await startPipeline({ ...buildStartParams(), project_name: project.name, tts_model_dir: renderer,
+      chapter_range: [chapter.chapter_index, chapter.chapter_index] })
+    dispatch({ kind: 'set-status', status: 'running' })
+    refreshChapters()
+  }
   async function handleResume() { try { await resumePipeline(); dispatch({ kind: 'set-status', status: 'running' }) } catch (e) { toast('crimson', e instanceof Error ? e.message : 'Failed to resume') } }
   async function handleStop()   { try { await stopPipeline();   dispatch({ kind: 'set-status', status: 'stopped' }) } catch (e) { toast('crimson', e instanceof Error ? e.message : 'Failed to stop')   } }
 
@@ -173,11 +199,15 @@ export default function CommandDeck() {
   ) {
     setProject(p); setProgress(prog); setLlmPath(llm); setTtsDir(tts)
     setEpubPath(epub)
+    setChapterRange(opts.chapterRange)
+    setChapterNumbers(opts.chapterNumbers ?? null)
     setSpeakers(spkList.join(', ')); setOutputFormat(opts.outputFormat)
     setVramCheck(opts.vramCheck); setSfxEnabled(opts.sfxEnabled)
     setSfxCategories(opts.sfxCategories); setSideTab('voices')
     saveCfg({
       projectName: p.name, llmPath: llm, ttsDir: tts, epubPath: epub,
+      chapterRange: opts.chapterRange,
+      chapterNumbers: opts.chapterNumbers ?? null,
       speakers: spkList.join(', '),
       outputFormat: opts.outputFormat, vramCheck: opts.vramCheck,
       sfxEnabled: opts.sfxEnabled, sfxCategories: opts.sfxCategories,
@@ -185,7 +215,8 @@ export default function CommandDeck() {
     fetchChapters(p)
     startPipeline({
       project_name: p.name, llm_model_path: llm, tts_model_dir: tts, speakers: spkList,
-      chapter_range: opts.chapterRange, output_format: opts.outputFormat,
+      chapter_range: opts.chapterRange, chapter_numbers: opts.chapterNumbers ?? null,
+      output_format: opts.outputFormat,
       vram_check_enabled: opts.vramCheck, sfx_enabled: opts.sfxEnabled,
       sfx_categories: opts.sfxCategories,
     })
@@ -203,14 +234,19 @@ export default function CommandDeck() {
     const timed = chapters.filter(c => c.processing_seconds != null && c.status === 'complete')
     if (!timed.length) return ''
     const avg = timed.reduce((s, c) => s + (c.processing_seconds ?? 0), 0) / timed.length
-    const remaining = progress.total - progress.complete - progress.error
+    const inRange = (c: Chapter) => chapterNumbers
+      ? c.chapter_number != null && c.chapter_number >= chapterNumbers[0] && c.chapter_number <= chapterNumbers[1]
+      : chapterRange ? c.chapter_index >= chapterRange[0] && c.chapter_index <= chapterRange[1] : true
+    const remaining = chapterNumbers || chapterRange
+      ? chapters.filter(c => inRange(c) && c.kind !== 'back' && c.status !== 'complete' && c.status !== 'error').length
+      : progress.total - progress.complete - progress.error
     return formatEta(avg * remaining)
-  }, [chapters, progress, pipeStatus])
+  }, [chapters, progress, pipeStatus, chapterRange, chapterNumbers])
 
   // Listenable chapters, in book order — the global player's queue.
   const playerQueue = useMemo(
     () => chapters
-      .filter(c => c.status === 'complete' && c.output_audio_path != null)
+      .filter(c => c.output_audio_path != null)
       .sort((a, b) => a.chapter_index - b.chapter_index),
     [chapters],
   )
@@ -243,6 +279,8 @@ export default function CommandDeck() {
         </div>
       )}
       <ProjectSetup
+        models={models}
+        initialRange={chapterNumbers}
         initialEpub={epubPath} initialLlm={llmPath}
         initialTtsDir={ttsDir} initialSpeakers={speakers}
         onCreated={handleProjectCreated}
@@ -251,7 +289,10 @@ export default function CommandDeck() {
   )
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden">
+    <div className="flex flex-col h-screen overflow-hidden" onPlayCapture={e => {
+      if (e.target instanceof HTMLAudioElement)
+        e.currentTarget.querySelectorAll('audio').forEach(el => { if (el !== e.target && !el.paused) el.pause() })
+    }}>
       <Toasts toasts={state.toasts} onDismiss={(id) => dispatch({ kind: 'dismiss-toast', id })} />
 
       <CommandStrip
@@ -280,8 +321,10 @@ export default function CommandDeck() {
           playerPlaying={playerPlaying}
           onPlay={setPlayingChId}
           onChanged={onRefresh}
+          projectId={project?.id ?? null}
         />
         <InspectorPanel
+            renderChapter={canStart ? renderChapter : undefined} renderers={models.tts} currentRenderer={ttsDir}
           tab={sideTab}
           onTabChange={setSideTab}
           running={pipeStatus === 'running' || pipeStatus === 'paused'}

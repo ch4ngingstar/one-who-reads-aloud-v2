@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { chapterName, chapterNumberLabel } from '@/lib/format'
 import {
   chapterSegmentsUrl, diarizeChapterCloud, getLines, importChapterLabels,
   type DiarizeProvider,
@@ -10,7 +11,7 @@ import type { Chapter } from '@/lib/types'
  *  as a readable script. Reuses GET /chapters/{id}/lines — no backend change. */
 async function downloadDiarization(chapter: Chapter) {
   const { lines } = await getLines(chapter.id)
-  const header = `Ch. ${chapter.chapter_index + 1} — ${chapter.title}\n` +
+  const header = `Ch. ${chapterNumberLabel(chapter)} — ${chapterName(chapter)}\n` +
                  `${lines.length} lines\n\n`
   const body = lines.map((l, idx) =>
     `[${String(idx + 1).padStart(4, '0')}] ${l.speaker} (${l.emotion}): ${l.text}`
@@ -153,7 +154,7 @@ export default function DiarizePanel({ chapter, onChanged }: {
   return (
     <div className="flex-1 overflow-y-auto p-5 min-h-0">
       <div className="font-display text-[15px] tracking-[1.5px] text-ink-primary leading-snug">
-        Ch. {chapter.chapter_index + 1} — {chapter.title}
+        Ch. {chapterNumberLabel(chapter)} — {chapterName(chapter)}
       </div>
       <div className="text-[10px] tracking-[0.18em] uppercase text-spell-g5 mt-1">
         {chapter.status}

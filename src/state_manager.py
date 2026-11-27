@@ -35,6 +35,7 @@ Chapter status lifecycle:
 """
 
 import sqlite3
+from collections import Counter
 import json
 from pathlib import Path
 from contextlib import contextmanager
@@ -96,6 +97,11 @@ CREATE TABLE IF NOT EXISTS lines (
     error_message TEXT,
     created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
     UNIQUE(chapter_id, line_index)
+);
+
+CREATE TABLE IF NOT EXISTS pronunciations (
+    spelling TEXT PRIMARY KEY COLLATE NOCASE,
+    reading TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS voices (
@@ -194,11 +200,46 @@ class StateManager:
                 # Sound design: 1 once the user has hand-edited a chapter's cues,
                 # which then guards against an auto-import clobbering manual edits.
                 "ALTER TABLE chapters ADD COLUMN cues_reviewed INTEGER NOT NULL DEFAULT 0",
+                # Voice Foundry WS1: segment kind (dialogue/thought/system/prose).
+                # segment_chunk() computes it then discards it, so it is recovered by
+                # deterministic replay -- see scripts/backfill_line_kind.py. Deliberately
+                # NULLable with no default: NULL means "not backfilled / did not reconcile",
+                # which must stay distinguishable from a real kind. Never guess a value.
+                "ALTER TABLE lines ADD COLUMN kind TEXT",
+                "ALTER TABLE lines ADD COLUMN take_revision INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE lines ADD COLUMN spoken_override TEXT",
+                "ALTER TABLE lines ADD COLUMN speaker_locked INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE lines ADD COLUMN review_reason TEXT",
+                "ALTER TABLE lines ADD COLUMN attribution TEXT",
+                # Real chapter identity: EPUB entries are numbered by position ("entry 141"
+                # is Chapter 1994) and end with a contents page; see chapter_titles.py.
+                "ALTER TABLE chapters ADD COLUMN chapter_number INTEGER",
+                "ALTER TABLE chapters ADD COLUMN display_title TEXT",
+                "ALTER TABLE chapters ADD COLUMN kind TEXT NOT NULL DEFAULT 'chapter'",
             ]:
                 try:
                     conn.execute(sql)
                 except sqlite3.OperationalError:
                     pass  # column already exists / already dropped
+            self._fill_chapter_identity(conn)
+
+    @staticmethod
+    def _fill_chapter_identity(conn) -> int:
+        """Give every chapter without one its real number, clean title and kind. Idempotent."""
+        from chapter_titles import identify
+        rows = conn.execute(
+            """SELECT c.id, c.title,
+                      (SELECT k.text FROM chunks k WHERE k.chapter_id = c.id
+                       ORDER BY k.chunk_index LIMIT 1) AS first_text
+               FROM chapters c WHERE c.display_title IS NULL"""
+        ).fetchall()
+        for row in rows:
+            identity = identify(row["title"], row["first_text"] or "")
+            conn.execute(
+                "UPDATE chapters SET chapter_number = ?, display_title = ?, kind = ? WHERE id = ?",
+                (identity.number, identity.display, identity.kind, row["id"]),
+            )
+        return len(rows)
 
     # ── Project seeding ───────────────────────────────────────────────────────
 
@@ -264,6 +305,8 @@ class StateManager:
                         (chapter_id, ck["chunk_index"], ck["text"], ck["word_count"]),
                     )
 
+        with self._conn() as conn:
+            self._fill_chapter_identity(conn)
         print(f"[state] Seeded project '{name}' (id={project_id}, "
               f"{book['total_chapters']} chapters)")
         return project_id
@@ -361,7 +404,7 @@ class StateManager:
                 """UPDATE chapters
                    SET status=?, output_audio_path=COALESCE(?,output_audio_path),
                        output_file_size_bytes=COALESCE(?,output_file_size_bytes),
-                       error_message=COALESCE(?,error_message),
+                       error_message=?,
                        processing_seconds=COALESCE(?,processing_seconds),
                        updated_at=?
                    WHERE id=?""",
@@ -406,6 +449,18 @@ class StateManager:
                 pass  # locked/unreadable file must not block the DB reset
         return n > 0
 
+    def queue_chapter_retry(self, chapter_id: int) -> bool:
+        """Queue the failed stage, preserving all existing direction and takes."""
+        with self._conn() as conn:
+            return conn.execute(
+                """UPDATE chapters SET status=CASE
+                       WHEN instr(error_message, '[failed_stage:assemble]') > 0 THEN 'tts_done'
+                       WHEN instr(error_message, '[failed_stage:synthesize]') > 0 THEN 'diarized'
+                       ELSE 'pending' END,
+                       error_message=NULL, updated_at=?
+                   WHERE id=? AND status='error'""", (_now(), chapter_id)
+            ).rowcount == 1
+
     # ── Chunk queries ─────────────────────────────────────────────────────────
 
     def get_chunks_for_chapter(self, chapter_id: int) -> list:
@@ -430,15 +485,31 @@ class StateManager:
                   "text": str, "emotion": str }]
         """
         with self._conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            prior = conn.execute(
+                "SELECT id,line_index,text,speaker,speaker_locked,spoken_override,take_revision "
+                "FROM lines WHERE chapter_id=?", (chapter_id,)).fetchall()
+            by_position = {(r["line_index"], r["text"]): r for r in prior}
+            old_counts = Counter(r["text"] for r in prior)
+            new_counts = Counter(line["text"] for line in lines)
+            by_text = {r["text"]: r for r in prior if old_counts[r["text"]] == new_counts[r["text"]] == 1}
+            values = []
+            for line in lines:
+                old = by_position.get((line["line_index"], line["text"]), by_text.get(line["text"]))
+                locked = old["speaker_locked"] if old else bool(line.get("speaker_locked"))
+                speaker = old["speaker"] if old and locked else line["speaker"]
+                override = old["spoken_override"] if old else line.get("spoken_override")
+                # Retakes are keyed by line ID and revision. Preserve both on an
+                # unambiguous match so a new direction pass keeps the chosen take.
+                values.append((old["id"] if old else None, chapter_id, line["line_index"], speaker,
+                               line["text"], line.get("emotion", "neutral"), line.get("kind"),
+                               override, locked, old["take_revision"] if old else 0, line.get("review_reason"),
+                               json.dumps(line["attribution"]) if line.get("attribution") else None))
             conn.execute("DELETE FROM lines WHERE chapter_id = ?", (chapter_id,))
             conn.executemany(
-                """INSERT INTO lines (chapter_id, line_index, speaker, text, emotion)
-                   VALUES (?, ?, ?, ?, ?)""",
-                [
-                    (chapter_id, ln["line_index"], ln["speaker"],
-                     ln["text"], ln.get("emotion", "neutral"))
-                    for ln in lines
-                ],
+                """INSERT INTO lines (id, chapter_id, line_index, speaker, text, emotion, kind,
+                   spoken_override, speaker_locked, take_revision, review_reason, attribution)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", values,
             )
             conn.execute(
                 """UPDATE chapters
@@ -449,13 +520,24 @@ class StateManager:
 
     # ── Line queries (Module 4 TTS input/output) ──────────────────────────────
 
+    def repair_render_inputs(self, chapter_id: int) -> bool:
+        """Recover missing WAVs on unfinished chapters. Keep every usable take."""
+        with self._conn() as conn:
+            rows = conn.execute("SELECT id, status, audio_path FROM lines WHERE chapter_id=?",
+                                (chapter_id,)).fetchall()
+            missing = [(r["id"],) for r in rows if r["status"] == "tts_done" and
+                       (not r["audio_path"] or not _resolve_stored_path(r["audio_path"]).is_file())]
+            if missing:
+                conn.executemany("UPDATE lines SET status='pending', audio_path=NULL WHERE id=?", missing)
+            return bool(missing) or any(r["status"] != "tts_done" for r in rows)
+
     def get_pending_tts_lines(self, chapter_id: int) -> list:
         """Lines not yet synthesised. Read by Module 4 (TTS Engine)."""
         with self._conn() as conn:
             rows = conn.execute(
-                """SELECT id, chapter_id, line_index, speaker, text, emotion
+                """SELECT id, chapter_id, line_index, speaker, text, emotion, kind
                    FROM lines
-                   WHERE chapter_id = ? AND status = 'pending'
+                   WHERE chapter_id = ? AND status IN ('pending', 'failed')
                    ORDER BY line_index""",
                 (chapter_id,),
             ).fetchall()
@@ -465,17 +547,64 @@ class StateManager:
         """All lines for a chapter. Read by Module 5 (Audio Assembler)."""
         with self._conn() as conn:
             rows = conn.execute(
-                """SELECT id, line_index, speaker, text, emotion, status, audio_path, error_message
+                    """SELECT id, line_index, speaker, text, emotion, kind, status, audio_path, error_message, take_revision, spoken_override, speaker_locked, review_reason, attribution
                    FROM lines WHERE chapter_id = ?
                    ORDER BY line_index""",
                 (chapter_id,),
             ).fetchall()
-            return [dict(r) for r in rows]
+            lines = [dict(r) for r in rows]
+            for line in lines:
+                if line["speaker_locked"]:
+                    line["attribution"] = {"method": "manual", "cue_indices": []}
+                    if line["review_reason"]:
+                        line["review_reason"] = line["review_reason"].removesuffix("Speaker needs confirmation.").strip() or None
+                elif line["attribution"]:
+                    line["attribution"] = json.loads(line["attribution"])
+            return lines
+
+    def queue_recording(self, chapter_id: int, line_index: int | None = None, speaker: str | None = None,
+                        reading: str | None = None):
+        """Keep the current master playable until the next edition publishes."""
+        with self._conn() as conn:
+            if not conn.execute("SELECT 1 FROM lines WHERE chapter_id=?", (chapter_id,)).fetchone():
+                raise ValueError("This chapter has no saved script.")
+            if line_index is not None:
+                changed = conn.execute(
+                    "UPDATE lines SET take_revision=take_revision+1, speaker=COALESCE(?,speaker), "
+                    "speaker_locked=CASE WHEN ? IS NULL THEN speaker_locked ELSE 1 END, "
+                    # Choosing a speaker by hand settles a flagged line.
+                    "review_reason=CASE WHEN ? IS NULL THEN review_reason ELSE NULL END, "
+                    "spoken_override=CASE WHEN ? IS NULL THEN spoken_override ELSE NULLIF(?, '') END, "
+                    "status='pending', error_message=NULL WHERE chapter_id=? AND line_index=?",
+                    (speaker, speaker, speaker, reading, reading, chapter_id, line_index))
+                if not changed.rowcount:
+                    raise ValueError("Unknown line.")
+            conn.execute("UPDATE chapters SET status='diarized', error_message=NULL, updated_at=? WHERE id=?",
+                         (_now(), chapter_id))
+
+    def has_current_labels(self, chapter_id: int, labeller: str = "qwen-v1") -> bool:
+        """True when ``labeller`` produced this chapter's lines (label_import marks every
+        chapter it stores, even one without quotes)."""
+        with self._conn() as conn:
+            current, = conn.execute("SELECT SUM(attribution LIKE ?) FROM lines WHERE chapter_id=?",
+                                    (f'%"{labeller}:%', chapter_id)).fetchone()
+            return bool(current)
+
+    def confirm_speaker(self, chapter_id: int, line_index: int) -> None:
+        """The labeller's speaker is right: lock it and clear the review flag.
+
+        Unlike a recast this keeps the recorded take - nothing about the line changed."""
+        with self._conn() as conn:
+            changed = conn.execute(
+                "UPDATE lines SET speaker_locked=1, review_reason=NULL WHERE chapter_id=? AND line_index=?",
+                (chapter_id, line_index))
+            if not changed.rowcount:
+                raise ValueError("Unknown line.")
 
     def mark_line_tts_done(self, line_id: int, audio_path: str) -> None:
         with self._conn() as conn:
             conn.execute(
-                """UPDATE lines SET status='tts_done', audio_path=? WHERE id=?""",
+                """UPDATE lines SET status='tts_done', audio_path=?, error_message=NULL WHERE id=?""",
                 (audio_path, line_id),
             )
 
@@ -488,7 +617,7 @@ class StateManager:
             return
         with self._conn() as conn:
             conn.executemany(
-                "UPDATE lines SET status='tts_done', audio_path=? WHERE id=?",
+                "UPDATE lines SET status='tts_done', audio_path=?, error_message=NULL WHERE id=?",
                 [(path, line_id) for line_id, path in updates],
             )
 
@@ -500,6 +629,18 @@ class StateManager:
             )
 
     # ── Voice mapping ─────────────────────────────────────────────────────────
+
+    def get_pronunciations(self) -> dict[str, str]:
+        with self._conn() as conn:
+            return dict(conn.execute("SELECT spelling, reading FROM pronunciations ORDER BY spelling"))
+
+    def set_pronunciation(self, spelling: str, reading: str) -> None:
+        with self._conn() as conn:
+            if reading:
+                conn.execute("INSERT INTO pronunciations VALUES (?,?) ON CONFLICT(spelling) "
+                             "DO UPDATE SET reading=excluded.reading", (spelling, reading))
+            else:
+                conn.execute("DELETE FROM pronunciations WHERE spelling=?", (spelling,))
 
     def set_voice(self, speaker: str, ref_audio_path: str) -> None:
         """Upsert a speaker -> reference audio mapping."""
@@ -518,6 +659,13 @@ class StateManager:
         with self._conn() as conn:
             cur = conn.execute("DELETE FROM voices WHERE speaker = ?", (speaker,))
             return cur.rowcount > 0
+
+    def emotion_counts_by_speaker(self) -> list:
+        """(speaker, emotion, count) over spoken lines, for per-character delivery baselines."""
+        with self._conn() as conn:
+            return [tuple(r) for r in conn.execute(
+                "SELECT speaker, emotion, COUNT(*) FROM lines "
+                "WHERE kind IN ('dialogue', 'thought') GROUP BY speaker, emotion")]
 
     def get_voice_map(self) -> dict:
         """Returns { speaker: {"path": str} }. Read by Module 4 (TTS Engine)."""

@@ -1,5 +1,6 @@
 'use client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { chapterName, chapterNumberLabel } from '@/lib/format'
 import { audioUrl } from '@/lib/api'
 import type { Chapter } from '@/lib/types'
 
@@ -198,9 +199,9 @@ export default function PlayerBar({ queue, currentId, onCurrentChange, onPlaying
             <span /><span /><span />
           </span>
           <span className="tech text-sm text-ink-ghost tabular-nums flex-shrink-0">
-            {String(chapter.chapter_index + 1).padStart(3, '0')}
+            {chapterNumberLabel(chapter)}
           </span>
-          <span className="text-[11px] text-ink-secondary truncate">{chapter.title}</span>
+          <span className="text-[11px] text-ink-secondary truncate">{chapterName(chapter)}</span>
           <span className="text-[9px] text-ink-ghost font-mono flex-shrink-0 ml-auto tabular-nums">
             {fmtTime(current)} <span className="opacity-50">/</span> {fmtTime(duration)}
           </span>

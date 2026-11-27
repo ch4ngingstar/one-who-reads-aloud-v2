@@ -1,4 +1,5 @@
 'use client'
+import PronunciationEditor from '@/components/PronunciationEditor'
 import { useEffect, useRef, useState } from 'react'
 import { uploadVoice, deleteVoice, voiceAudioUrl } from '@/lib/api'
 import ConfirmButton from '@/components/ConfirmButton'
@@ -161,6 +162,7 @@ export default function VoiceMapper({ voices, onUpdate }: { voices: Voice[]; onU
       </div>
 
       {/* Roster summary */}
+      <PronunciationEditor />
       <div className="flex items-center gap-2 text-[10px]">
         <span className="text-ink-ghost">
           <span className="tech text-sm text-ink-secondary">{registered}</span> voices

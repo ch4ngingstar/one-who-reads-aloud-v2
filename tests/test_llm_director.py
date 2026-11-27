@@ -161,13 +161,17 @@ def test_segment_system_paragraph_trailing_period():
     print("  PASS test_segment_system_paragraph_trailing_period")
 
 
-def test_segment_unbalanced_quote_falls_back_to_prose():
+def test_segment_unclosed_quote_runs_to_the_paragraph_end():
+    # English convention: a speech continued in the next paragraph drops its
+    # closing mark. The old fallback narrated ~470 such paragraphs as prose.
     text = 'He opened his mouth. "This quote never closes... and the paragraph ends.'
     segs = segment_chunk(text)
-    assert len(segs) == 1
-    assert segs[0]["kind"] == "prose"
-    assert segs[0]["text"] == text
-    print("  PASS test_segment_unbalanced_quote_falls_back_to_prose")
+    assert [(s["kind"], s["text"]) for s in segs] == [
+        ("prose", "He opened his mouth."),
+        ("dialogue", "This quote never closes... and the paragraph ends.")]
+    assert segs[1]["hint"] == ["unclosed"]
+    # A free-standing mark followed by a space opens nothing.
+    assert segment_chunk('A damaged passage with a " mark.')[0]["kind"] == "prose"
 
 
 def test_segment_system_paragraph():
@@ -433,6 +437,7 @@ def test_fallback_on_total_failure_preserves_all_text():
     _, ch_id = _seed_chapter(sm, [text])
 
     director = _make_director(sm, mock_fn=lambda t, temperature=0.2: "not json }")
+    director.cfg["allow_unlabelled_fallback"] = True
     n_lines = director.process_chapter(ch_id)
 
     assert n_lines == 4, f"Expected 4 fallback segments, got {n_lines}"
@@ -511,7 +516,7 @@ TESTS = [
     test_segment_possessives_do_not_become_thoughts,
     test_segment_curly_single_thought,
     test_segment_system_paragraph_trailing_period,
-    test_segment_unbalanced_quote_falls_back_to_prose,
+    test_segment_unclosed_quote_runs_to_the_paragraph_end,
     test_segment_system_paragraph,
     test_segment_multiple_brackets_one_paragraph,
     test_segment_inline_bracket_stays_prose,

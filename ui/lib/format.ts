@@ -1,3 +1,18 @@
+type ChapterLike = { chapter_index: number; title: string; chapter_number?: number | null;
+  display_title?: string | null; kind?: string | null }
+
+/** The book's chapter number ("1994"); "Intro" for the synopsis; position for unnumbered books. */
+export function chapterNumberLabel(chapter: ChapterLike): string {
+  if (chapter.kind === 'front') return 'Intro'
+  return String(chapter.chapter_number ?? chapter.chapter_index + 1)
+}
+
+/** The chapter's name without the "Chapter 1994:" prefix (the number is shown beside it). */
+export function chapterName(chapter: ChapterLike): string {
+  const display = chapter.display_title || chapter.title
+  return display.replace(/^chapter\s+\d+\s*[:.\-–—]?\s*/i, '') || display
+}
+
 /** "~2h 5m left" / "~4m left" — ETA from seconds; empty when unknowable. */
 export function formatEta(seconds: number): string {
   if (!isFinite(seconds) || seconds <= 0) return ''

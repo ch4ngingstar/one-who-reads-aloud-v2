@@ -40,6 +40,7 @@ OUTPUT (to Module 2 StateManager):
 import gc
 import json
 import re
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -74,6 +75,11 @@ DEFAULT_SPEAKERS = [
     # epithet "Nightwalker"), Moonveil 7, Warden 7, Bloodwave 4). Voices resolve
     # via SPEAKER_ALIASES in tts_engine.py (Anvil->Lord Valor, etc.).
     "Anvil", "Ki Song", "Eurys", "Naeve", "Bloodwave", "Moonveil", "Warden",
+    # Post-2300 recurring speakers given designed voices (2026-11-25 casting;
+    # chapters where they appear beside dialogue: Aether 33, Madoc 24, Lonesome Howl 10).
+    "Aether", "Madoc", "Lonesome Howl",
+    # Round 3 (2026-11-25): unvoiced post-2300 speakers ranked by scripts/cast.py discover.
+    "Azarax", "Yutra", "Little Ling", "Pill", "Noctis", "Tegrot", "Death Singer", "Beth", "Quentin",
 ]
 
 # Non-roster speaker archetypes. The diarizer routes an UNNAMED / non-roster
@@ -167,12 +173,21 @@ A6 [T] segments belong to whoever the scene follows. The thought may mention oth
    thought, NOT Narrator and NOT the person mentioned.
 
 == EMOTION GUIDE ==
-Narrator : neutral default / frightened, desperate in horror or battle / excited at revelations
-Sunny    : cold default / sarcastic / confused -- stoic, rarely openly emotional
-Nephis   : commanding default / cold / neutral -- always composed
-Cassie   : sad / pleading / neutral -- gentle, soft-spoken
-Effie    : excited default / neutral -- energetic
-Kai      : neutral / commanding -- calm, professional
+Choose every line's emotion from that line's own words and the prose around it.
+The lists below are each character's plausible RANGE -- they tell you which
+emotions suit that character, NEVER which one to apply by default. A character
+does not have a "usual tone" you may fall back on. With no cue in the text, use
+neutral for that line only.
+Narrator : neutral, frightened or desperate in horror and battle, excited at revelations
+Sunny    : neutral, sarcastic, confused, cold -- stoic, rarely openly emotional
+Nephis   : neutral, cold, commanding -- always composed
+Cassie   : neutral, sad, pleading -- gentle, soft-spoken
+Effie    : neutral, excited, confused -- energetic
+Kai      : neutral, commanding -- calm, professional
+ANTI-SKEW RULE: never give one character the same emotion on most of their lines.
+If a speaker has many lines in a chapter and nearly all carry a single emotion,
+that output is WRONG -- re-read and judge each line on its own evidence. A whole
+chapter of one character sounding commanding, or cold, or excited, is a failure.
 Dialogue emotion follows the words AND the manner-cue in the attribution around it.
 - A manner-cue in the [P] segment right before or after a [D] line sets that line's tone:
   "whispered"/"murmured"/"hushed" -> whispers; "shouted"/"barked"/"roared" -> angry or
@@ -180,8 +195,9 @@ Dialogue emotion follows the words AND the manner-cue in the attribution around 
   sits in the PREVIOUS or NEXT prose segment, NOT inside the spoken words -- carry it onto
   the [D] line instead of defaulting to the speaker's usual tone.
 - questions -> confused ONLY when the speaker is genuinely uncertain or seeking an answer.
-  A rhetorical, rote, or commanding question keeps the speaker's default tone (a cold threat
-  phrased as a question stays cold; a calm clarifying question stays neutral).
+  A rhetorical, rote, or commanding question takes the tone the surrounding scene
+  establishes (a cold threat phrased as a question stays cold; a calm clarifying question
+  stays neutral).
 - threats -> cold or angry; shouting -> angry or excited; hushed speech -> whispers.
 
 == EPITHET GLOSSARY (later volumes name characters by TITLE -- map the title to the name) ==
@@ -280,6 +296,17 @@ def _allowed_speakers(speakers: "list[str]") -> "set[str]":
     return {"Narrator", "Unknown", SYSTEM_SPEAKER, *NPC_ARCHETYPES, *speakers}
 
 
+def _ordered_grammar(count: int, actors) -> str:
+    """Constrain the wire format and indices; the model chooses only the labels."""
+    literal = lambda s: json.dumps(s, ensure_ascii=False)
+    def choices(values):
+        return " | ".join(literal(json.dumps(s, ensure_ascii=False)) for s in sorted(values))
+    entries = [literal('{"i":' + str(i) + ',"speaker":') + ' actor ' +
+               literal(',"emotion":') + ' emotion ' + literal('}') for i in range(count)]
+    root = 'root ::= ' + literal('{"labels":[') + ' ' + (' ' + literal(',') + ' ').join(entries) + ' ' + literal(']}')
+    return "\n".join([root, "actor ::= " + choices(actors), "emotion ::= " + choices(EMOTION_VOCAB)])
+
+
 def _label_json_schema(speakers: "list[str]") -> dict:
     return {
         "type": "object",
@@ -338,11 +365,14 @@ def _parse_labels(response_text: str, n_segments: int) -> "dict[int, tuple[str, 
 
     labels: dict[int, tuple[str, str]] = {}
     for item in data["labels"]:
-        try:
-            idx = int(item.get("i"))
-        except (TypeError, ValueError):
-            continue
-        speaker = str(item.get("speaker", "Narrator"))
+        if not isinstance(item, dict):
+            raise ValueError("Expected a speaker label object")
+        idx = item.get("i")
+        if type(idx) is not int or not 0 <= idx < n_segments or idx in labels:
+            raise ValueError(f"Invalid or duplicate segment index: {idx!r}")
+        speaker = item.get("speaker")
+        if not isinstance(speaker, str) or not speaker.strip():
+            raise ValueError(f"Missing speaker on segment {idx}")
         emotion = str(item.get("emotion", "neutral"))
         if emotion not in EMOTION_VOCAB:
             emotion = "neutral"
@@ -437,6 +467,7 @@ def enforce_labels(
     for seg in segments:
         speaker, emotion = labels[seg["index"]]
         kind, text = seg["kind"], seg["text"]
+        used_thought_default = False
 
         if kind == KIND_PROSE:
             # Prose is Narrator -- except Sunny inner monologue that genuinely
@@ -453,6 +484,7 @@ def enforce_labels(
             # pick; only repair impossible labels.
             if speaker not in allowed or speaker == SYSTEM_SPEAKER:
                 speaker = "Sunny"
+                used_thought_default = True
         elif kind == KIND_SYSTEM:
             # Brackets carry Spell notifications AND telepathic rune messages --
             # keep any valid roster label, default to the Spell only when impossible.
@@ -469,8 +501,11 @@ def enforce_labels(
             "line_index": line_offset + len(lines),
             "speaker":    speaker,
             "text":       text,
+            "kind":       kind,
             "emotion":    emotion,
         })
+        if used_thought_default:
+            lines[-1]["attribution"] = {"method": "fallback", "cue_indices": []}
     return lines
 
 
@@ -499,6 +534,8 @@ class LLMDirector:
         self.cfg            = {**_DEFAULT_CFG, **(cfg or {})}
         self._llm           = None
         self._grammar       = None
+        self._ordered_grammars = {}
+        self._label_count = 0
         self._system_prompt = _build_system_prompt(self.speakers)
         self._allowed       = _allowed_speakers(self.speakers)
 
@@ -547,12 +584,11 @@ class LLMDirector:
             self._llm = None
         self._grammar = None
         gc.collect()
-        try:
-            import torch
+        # llama.cpp owns its allocations. Clear PyTorch only if it already ran here.
+        torch = sys.modules.get("torch")
+        if torch is not None and torch.cuda.is_initialized():
             torch.cuda.empty_cache()
             print("[llm] CUDA cache cleared.")
-        except ImportError:
-            pass
         print("[llm] VRAM released.")
 
     def _build_grammar(self):
@@ -584,13 +620,136 @@ class LLMDirector:
         for chunk in chunks:
             print(f"[llm]   Chunk {chunk['chunk_index'] + 1}/{len(chunks)} "
                   f"({chunk['word_count']} words)...")
-            lines = self._process_chunk(chunk["text"], line_offset=len(all_lines))
+            lines = self._process_chunk(chunk["text"], line_offset=len(all_lines), previous=all_lines[-4:])
             all_lines.extend(lines)
             print(f"[llm]   -> {len(lines)} lines")
 
+        self._review_exchanges(all_lines)
+        self._apply_explicit_attributions(all_lines)
+        for line in all_lines:
+            reasons = [line["review_reason"]] if line.get("review_reason") else []
+            if "\ufffd" in line["text"]:
+                reasons.append("Source contains an unreadable character; check the book or edit the reading.")
+            if (line["speaker"] == "Unknown"
+                    or (line["kind"] == KIND_THOUGHT and line["speaker"] == "Narrator")
+                    or (line["kind"] in (KIND_DIALOGUE, KIND_THOUGHT)
+                        and line.get("attribution", {}).get("method") == "fallback")):
+                reasons.append("Speaker needs confirmation.")
+            if line["kind"] in (KIND_DIALOGUE, KIND_THOUGHT):
+                line.setdefault("attribution", {"method": "inferred", "cue_indices": []})
+            if reasons:
+                line["review_reason"] = " ".join(reasons)
+        source_words = re.findall(r"\w+", "\n".join(chunk["text"] for chunk in chunks))
+        directed_words = re.findall(r"\w+", "\n".join(line["text"] for line in all_lines))
+        if directed_words != source_words:
+            raise ValueError("Directed script changed source text or line order; chapter was not saved.")
         self.sm.save_diarized_lines(chapter_id, all_lines)
         print(f"[llm] Chapter {chapter_id} diarized: {len(all_lines)} total lines.")
         return len(all_lines)
+
+    def _apply_explicit_attributions(self, lines):
+        """Use explicit book attributions when the sampled speaker disagrees."""
+        from casting import SPEAKER_ALIASES
+        actors = {s.casefold(): s for s in self._allowed if s not in ("Unknown", "Narrator")}
+        for alias, actor in SPEAKER_ALIASES.items():
+            if actor in self._allowed:
+                actors.setdefault(alias.casefold(), actor)
+        names = "|".join(re.escape(k) for k in sorted(actors, key=len, reverse=True))
+        verb = r"(?:said|asked|whispered|answered|replied|muttered|shouted)"
+        # Restrict the complete clause: mentioning another actor mid-sentence is weak evidence.
+        lead = re.compile(rf"(?:^|[.!?]\s+)({names})\s+{verb}(?:\s+\w+ly)?\s*:$", re.I)
+        tail = re.compile(rf"^(?:({names})\s+{verb}|{verb}\s+({names}))(?:\s+\w+ly)?\s*[.,!?]", re.I)
+        for i, line in enumerate(lines):
+            if line["kind"] != KIND_DIALOGUE:
+                continue
+            votes = {}
+            if i and lines[i-1]["kind"] == KIND_PROSE:
+                m = lead.search(lines[i-1]["text"].strip())
+                if m:
+                    votes.setdefault(actors[m[1].casefold()], []).append(i - 1)
+            if i+1 < len(lines) and lines[i+1]["kind"] == KIND_PROSE:
+                # '...,' said Jet. A separate 'Jet replied:' introduces the NEXT quote.
+                following = lines[i+1]["text"].lstrip()
+                if line["text"].rstrip().endswith(",") or following[:1].islower():
+                    m = tail.match(following)
+                    if m:
+                        votes.setdefault(actors[(m[1] or m[2]).casefold()], []).append(i + 1)
+            if len(votes) == 1:
+                (actor, evidence), = votes.items()
+                line["speaker"] = actor
+                line["attribution"] = {"method": "explicit", "cue_indices": evidence}
+            if i >= 2 and line.get("_paragraph") is not None:
+                prev, bridge = lines[i-2:i]
+                if (prev["kind"] == KIND_DIALOGUE and bridge["kind"] == KIND_PROSE
+                        and prev.get("_paragraph") == bridge.get("_paragraph") == line["_paragraph"]):
+                    m = tail.fullmatch(bridge["text"].strip())
+                    if m:
+                        actor = actors[(m[1] or m[2]).casefold()]
+                        prev["speaker"] = line["speaker"] = actor
+                        prev["attribution"] = line["attribution"] = {
+                            "method": "explicit", "cue_indices": [i - 1]}
+
+    def _review_exchanges(self, lines):
+        """Revisit an apparent self-reply using the surrounding scene across chunk boundaries."""
+        from casting import SPEAKER_ALIASES
+        addresses = {name: name for name in self._allowed}
+        addresses.update({name: actor for name, actor in SPEAKER_ALIASES.items() if actor in self._allowed})
+        address_names = "|".join(re.escape(name) for name in sorted(addresses, key=len, reverse=True))
+        vocative = re.compile(r"(?:^|,\s*)(" + address_names + r")\s*[,!?\.]", re.I)
+        names = {name.casefold(): value for name, value in addresses.items()}
+        reviewed = set()
+        for i in range(1, len(lines)):
+            question, answer = lines[i - 1:i + 1]
+            if (i in reviewed or question["kind"] != KIND_DIALOGUE or answer["kind"] != KIND_DIALOGUE
+                    or "?" not in question["text"]):
+                continue
+            match = vocative.search(answer["text"])
+            listener = names[match[1].casefold()] if match else None
+            if question["speaker"] != answer["speaker"] and answer["speaker"] != listener:
+                continue
+            confirmed_listener = listener is not None and listener == question["speaker"]
+            # The next spoken response often disambiguates who asked the question.
+            targets = [i - 1, i]
+            for j in range(i + 1, min(i + 4, len(lines))):
+                if lines[j]["kind"] == KIND_DIALOGUE:
+                    targets.append(j)
+                    break
+            nearby = lines[max(0, i - 6):min(len(lines), targets[-1] + 5)]
+            scene_cast = {row["speaker"] for row in nearby if row["kind"] in (KIND_DIALOGUE, KIND_THOUGHT)}
+            if listener:
+                scene_cast.add(listener)
+            context = "\n".join(f"[{row['kind']}] {row['text'][:420]}" for row in nearby)
+            prompt = ("Resolve the speakers of this exchange. A form of address names the listener. "
+                      f"The voices in this part of the scene are {', '.join(sorted(scene_cast))}. "
+                      "Use the action beats and what each character knows. A speaker may continue "
+                      "their own question. Read the scene first:\n" + context +
+                      "\n\nReturn labels only for these numbered lines:\n" +
+                      "\n".join(f"{k} [D] {lines[j]['text']}" for k, j in enumerate(targets)))
+            if self.cfg.get("no_think") or (self.cfg.get("no_think") is None and "qwen3" in self.model_path.name.lower()):
+                prompt += "\n/no_think"
+            try:
+                self._label_count = len(targets)
+                labels = _parse_labels(self._call_llm(prompt, temperature=0.1), len(targets))
+            except (ValueError, KeyError, TypeError):
+                continue
+            for k, j in enumerate(targets):
+                speaker = labels[k][0]
+                if speaker in scene_cast and speaker in self._allowed and speaker not in ("Unknown", "Narrator"):
+                    lines[j]["speaker"] = speaker
+                    lines[j]["attribution"] = {"method": "exchange", "cue_indices": [t for t in targets if t != j]}
+            if confirmed_listener and re.search(r"\byou\b", answer["text"], re.I):
+                question["speaker"] = listener
+                question["attribution"] = {"method": "vocative", "cue_indices": [i]}
+                others = scene_cast - {listener, "Unknown", "Narrator"}
+                if len(others) == 1 and answer["speaker"] == listener:
+                    answer["speaker"] = next(iter(others))
+                    answer["attribution"] = {"method": "vocative", "cue_indices": [i - 1]}
+                if len(targets) == 3 and re.search(r"\bif you\b", answer["text"], re.I):
+                    reply = lines[targets[-1]]
+                    if re.match(r"\s*if I\b", reply["text"], re.I):
+                        reply["speaker"] = listener
+                        reply["attribution"] = {"method": "vocative", "cue_indices": [i]}
+            reviewed.update(targets)
 
     # ── Internal: segment formatting / merging ─────────────────────────────────
 
@@ -623,17 +782,31 @@ class LLMDirector:
             "line_index": line_offset + i,
             "speaker":    defaults[seg["kind"]][0],
             "text":       seg["text"],
+            "kind":       seg["kind"],
             "emotion":    defaults[seg["kind"]][1],
+            "attribution": {"method": "fallback", "cue_indices": []},
         } for i, seg in enumerate(segments)]
 
     # ── Internal: retry loop ───────────────────────────────────────────────────
 
-    def _process_chunk(self, text: str, line_offset: int) -> "list[dict]":
-        segments = segment_chunk(text)
+    def _process_chunk(self, text: str, line_offset: int, previous=None) -> "list[dict]":
+        segments = segment_chunk(text, include_paragraph=True)
+        lines = self._label_segments(segments, line_offset, previous, recover=True)
+        for seg, line in zip(segments, lines, strict=True):
+            line["_paragraph"] = (line_offset, seg["paragraph"])
+            if seg.get("review_reason"):
+                line["review_reason"] = seg["review_reason"]
+        return lines
+
+    def _label_segments(self, segments, line_offset, previous, recover):
         if not segments:
             return []
 
         user_msg = self._format_segments(segments)
+        if previous:
+            context = "\n".join(f"{line['speaker']}: {line['text'][-180:]}" for line in previous)
+            user_msg = ("Previously directed passage, for speaker continuity only:\n" + context +
+                        "\n\nLabel only the following numbered segments:\n" + user_msg)
         _no_think = self.cfg.get("no_think")
         if _no_think is None:
             _model_name = self.model_path.name.lower()
@@ -642,6 +815,7 @@ class LLMDirector:
             user_msg += "\n/no_think"  # disable hybrid thinking on Qwen3
 
         last_error: Optional[Exception] = None
+        self._label_count = len(segments)
         for attempt in range(self.cfg["max_retries"]):
             temp = (self.cfg["temperature"] if attempt == 0
                     else self.cfg["retry_temp"])
@@ -654,8 +828,15 @@ class LLMDirector:
                 print(f"[llm]   Label parse error (attempt {attempt + 1}): {e}")
                 time.sleep(0.5)
 
-        print(f"[llm]   WARNING: all retries failed ({last_error}). "
-              f"Falling back to per-segment defaults (preserves all text).")
+        if recover and len(segments) > 1 and not self.cfg.get("allow_unlabelled_fallback"):
+            cut = len(segments) // 2
+            left = self._label_segments(segments[:cut], line_offset, previous, recover=False)
+            right = [dict(seg, index=i) for i, seg in enumerate(segments[cut:])]
+            return left + self._label_segments(right, line_offset + cut, left[-4:], recover=False)
+        if not self.cfg.get("allow_unlabelled_fallback") and any(seg["kind"] != KIND_PROSE for seg in segments):
+            raise ValueError(f"Could not assign every speaker at line {line_offset}: {last_error}. "
+                             "Retry direction or import reviewed labels before recording.")
+        print(f"[llm] Using structural defaults after invalid labels: {last_error}")
         return self._fallback_lines(segments, line_offset)
 
     # ── Internal: raw LLM call (injectable for testing) ───────────────────────
@@ -679,7 +860,16 @@ class LLMDirector:
             "top_p":       self.cfg.get("top_p", 0.8),
             "max_tokens":  self.cfg["max_tokens"],
         }
-        if self._grammar is not None:
+        # Gemma's chat template has no system role. Include instructions in the
+        # user turn so the roster and source-preservation rules reach the model.
+        if "gemma" in self.model_path.name.casefold():
+            kwargs["messages"] = [{"role": "user", "content": self._system_prompt + "\n\n" + text}]
+        if self._label_count:
+            if self._label_count not in self._ordered_grammars:
+                self._ordered_grammars[self._label_count] = LlamaGrammar.from_string(
+                    _ordered_grammar(self._label_count, self._allowed), verbose=False)
+            kwargs["grammar"] = self._ordered_grammars[self._label_count]
+        elif self._grammar is not None:
             kwargs["grammar"] = self._grammar
         else:
             kwargs["response_format"] = {"type": "json_object"}

@@ -103,6 +103,18 @@ Naeve
 Bloodwave
 Moonveil
 Warden
+Aether
+Madoc
+Lonesome Howl
+Azarax
+Yutra
+Little Ling
+Pill
+Noctis
+Tegrot
+Death Singer
+Beth
+Quentin
 Unknown
 The Nightmare Spell
 
@@ -162,20 +174,33 @@ A4 [S] system: Nightmare Spell notifications ("You have slain...", "Your shadow 
    A bare stat/item readout the narrator would read ([1591/6000]) -> Narrator.
 
 == EMOTION GUIDE ==
-Narrator : neutral default / frightened, desperate in horror or battle / excited at reveals.
-Sunny    : cold default / sarcastic / confused -- stoic, rarely openly emotional.
-Nephis   : commanding default / cold / neutral -- always composed.
-Cassie   : sad / pleading / neutral -- gentle, soft-spoken.   Effie : excited / neutral.
-Kai      : neutral / commanding.    Rain : confused / frightened / excited -- expressive.
-Mordret  : sarcastic / cold / commanding -- theatrical, mocking.
-Anvil    : commanding / cold -- stern, kingly.    Jest : sarcastic / laughing / excited.
+Choose every line's emotion from that line's own words and the prose around it.
+The lists below are each character's plausible RANGE -- they tell you which emotions
+suit that character, NEVER which one to apply by default. A character does not have
+a "usual tone" you may fall back on. With no cue in the text, use neutral for that
+line only.
+Narrator : neutral, frightened or desperate in horror and battle, excited at revelations
+Sunny    : neutral, sarcastic, confused, cold -- stoic, rarely openly emotional
+Nephis   : neutral, cold, commanding -- always composed
+Cassie   : neutral, sad, pleading -- gentle, soft-spoken
+Effie    : neutral, excited, confused -- energetic
+Kai      : neutral, commanding -- calm, professional
+Rain     : neutral, confused, frightened, excited -- expressive
+Mordret  : neutral, sarcastic, cold, commanding -- theatrical, mocking
+Anvil    : neutral, commanding, cold -- stern, kingly
+Jest     : neutral, sarcastic, laughing, excited
+ANTI-SKEW RULE: never give one character the same emotion on most of their lines.
+If a speaker has many lines in a chapter and nearly all carry a single emotion, that
+output is WRONG -- re-read and judge each line on its own evidence. A whole chapter of
+one character sounding commanding, or cold, or excited, is a failure. As a check: no
+speaker's most common emotion should cover more than about 45% of their lines.
 Dialogue emotion follows the words AND the manner-cue in the attribution around it:
 - A manner-cue in the [P] segment right before/after a [D] line sets that line's tone:
   "whispered/murmured/hushed" -> whispers; "shouted/barked/roared" -> angry or excited;
   "pleaded/begged" -> pleading; "said coldly/hissed" -> cold. The cue usually sits in the
   PREVIOUS or NEXT prose segment, NOT inside the spoken words -- carry it onto the [D] line.
 - questions -> confused ONLY when the speaker is genuinely uncertain. A rhetorical, rote, or
-  commanding question keeps the speaker's default tone.
+  commanding question takes the tone the surrounding scene establishes.
 - threats -> cold or angry; shouting -> angry or excited; hushed speech -> whispers.
 
 == EXAMPLE 1 (basics: dialogue / thought / system) ==
@@ -275,10 +300,13 @@ the voice map). Notes for the late-volume cast:
   Aiko, Fleur, Mordret, Roan, Kim, Asterion, Luster, Tamar, Revel, Tyris, Julius,
   Beastmaster, **Anvil**(→Lord Valor), **Ki Song**(→Queen Ki Song), **Eurys**, **Naeve**,
   **Bloodwave**, and all 5 archetypes.
-- **No clip yet → currently fall back to the Narrator voice:** **Jest, Seishan, Helie,
-  Moonveil, Warden.** Label them correctly anyway (the labels are right and future-proof) —
-  then register a clip via the UI **Voices** tab / `POST /api/voices` so they get a distinct
-  voice. Jest is a frequent vol9 speaker, so it's the highest priority.
+- **Jest, Seishan, Helie, Moonveil and Warden now have their own clips too** (registered
+  2026-06-23; verified present 2026-08-27). Every roster name and all 5 archetypes resolve to
+  a distinct voice, so **no valid label falls back to the Narrator voice.**
+- **A roster name with no registered clip falls back to the Narrator voice.** If you add a new
+  name to `DEFAULT_SPEAKERS`, register a clip via the UI **Voices** tab / `POST /api/voices`,
+  or that character will sound like the narrator. Label correctly regardless — labels are
+  stored independently of voices and stay future-proof.
 - The 5 NPC archetypes each have a distinct registered voice, so routing an unnamed speaker
   to the right archetype is what stops every guard/official/monster from sounding like the
   narrator.

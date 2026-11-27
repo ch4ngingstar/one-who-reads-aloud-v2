@@ -26,6 +26,7 @@ REQUIREMENT: FFmpeg must be in PATH (same as AudioAssembler).
 
 import subprocess
 import wave
+from pacing import pause_ms
 from pathlib import Path
 
 from state_manager import _resolve_stored_path
@@ -83,6 +84,7 @@ class SoundDesigner:
         sorted_lines: list,
         inter_line_silence_ms: int,
         inter_speaker_silence_ms: int,
+        pauses: "dict | None" = None,
     ) -> "tuple[dict[int, tuple[float, float]], float]":
         """Compute {line_index: (start_ms, end_ms)} matching the concat order.
 
@@ -98,11 +100,7 @@ class SoundDesigner:
         for i, line in enumerate(sorted_lines):
             if i > 0:
                 prev = sorted_lines[i - 1]
-                cursor += (
-                    inter_speaker_silence_ms
-                    if prev["speaker"] != line["speaker"]
-                    else inter_line_silence_ms
-                )
+                cursor += pause_ms(prev, line, inter_line_silence_ms, inter_speaker_silence_ms, pauses)
             wav = _resolve_stored_path(line["audio_path"]).resolve()
             dur = self._wav_duration_ms(wav)
             start = cursor

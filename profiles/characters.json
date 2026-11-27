@@ -1,0 +1,313 @@
+{
+  "version": 1,
+  "purpose": "Who can speak in Shadow Slave volumes 8-11: canonical name, gender, and every name the text uses for them. Labellers answer with a canonical name; the gender drives the he/she consistency check and the voice fallback for characters without a cast voice. Add characters freely; 'voice' names the cast entry when it differs from the canonical name. Genders cross-checked against pronoun counts after each name in the four EPUBs (2026-11-25). Yutra corrected to male 2026-11-25 (ch 2737 'the man', ch 2746 has a wife) after both gold annotators flagged it. 'notes' are shown to the labeller; 'often_with' adds hidden companions (Rain's unseen teacher Sunny) to the candidate speakers. 'descriptors' map a description to a character only when another is in the chapter ('her teacher' = Sunny in Rain's chapters, 268 of 278 uses).",
+  "characters": {
+    "Sunny": {
+      "gender": "male",
+      "aliases": [
+        "Sunless",
+        "Master Sunless",
+        "Lord Shadow",
+        "Lord of Shadows",
+        "Detective Sunless",
+        "Mr. Sunless",
+        "Shadow Lord",
+        "Saint Sunless"
+      ],
+      "notes": "the protagonist. In Rain's chapters he is her secret teacher: she calls him 'her teacher' and he speaks from the darkness or shadows without being seen. Shop owner 'Master Sunless' of the Brilliant Emporium; Nephis's chapters may call him 'the charming young man' or 'the enchanter'.",
+      "descriptors": {
+        "her teacher": "Rain",
+        "the teacher": "Rain"
+      }
+    },
+    "Nephis": {
+      "gender": "female",
+      "aliases": [
+        "Neph",
+        "Changing Star",
+        "Lady Nephis",
+        "Lady Changing Star",
+        "Saint Nephis"
+      ],
+      "notes": "Changing Star; in her chapters she may think of Sunny as 'Master Sunless'.",
+      "often_with": [
+        "Sunny"
+      ]
+    },
+    "Cassie": {
+      "gender": "female",
+      "aliases": [
+        "Cassia",
+        "Lady Cassia",
+        "Song of the Fallen",
+        "Saint Cassia"
+      ],
+      "notes": "blind seer; can speak telepathically (her voice sounds in someone's mind)."
+    },
+    "Effie": {
+      "gender": "female",
+      "aliases": [
+        "Athena",
+        "Saint Athena"
+      ]
+    },
+    "Kai": {
+      "gender": "male",
+      "aliases": [
+        "Nightingale",
+        "Saint Kai",
+        "Lord Nightingale"
+      ]
+    },
+    "Jet": {
+      "gender": "female",
+      "aliases": [
+        "Soul Reaper",
+        "Soul Reaper Jet",
+        "Saint Jet",
+        "Master Jet"
+      ]
+    },
+    "Morgan": {
+      "gender": "female",
+      "aliases": [
+        "Morgan of Valor",
+        "Princess Morgan",
+        "Lady Morgan"
+      ]
+    },
+    "Mordret": {
+      "gender": "male",
+      "aliases": [
+        "Prince of Nothing",
+        "Other Mordret",
+        "Mordret of Valor"
+      ]
+    },
+    "Anvil": {
+      "gender": "male",
+      "aliases": [
+        "King of Swords",
+        "Anvil of Valor",
+        "King Anvil",
+        "Lord of Swords"
+      ]
+    },
+    "Ki Song": {
+      "gender": "female",
+      "aliases": [
+        "Queen Ki Song",
+        "Queen of Worms",
+        "Queen Song"
+      ]
+    },
+    "Seishan": {
+      "gender": "female",
+      "aliases": [
+        "Lady Seishan",
+        "Seishan of Song",
+        "Saint Seishan"
+      ]
+    },
+    "Revel": {
+      "gender": "female",
+      "aliases": [
+        "Revel of Song",
+        "Saint Revel"
+      ]
+    },
+    "Rain": {
+      "gender": "female",
+      "aliases": [
+        "Lady Rain"
+      ],
+      "notes": "Sunny's younger sister; her chapters are told from her point of view.",
+      "often_with": [
+        "Sunny"
+      ]
+    },
+    "Ray": {
+      "gender": "male",
+      "aliases": []
+    },
+    "Fleur": {
+      "gender": "female",
+      "aliases": []
+    },
+    "Tamar": {
+      "gender": "female",
+      "aliases": [
+        "Tamar of Sorrow",
+        "Lady Tamar"
+      ]
+    },
+    "Aiko": {
+      "gender": "female",
+      "aliases": []
+    },
+    "Jest": {
+      "gender": "male",
+      "aliases": [
+        "Saint Jest"
+      ]
+    },
+    "Asterion": {
+      "gender": "male",
+      "aliases": []
+    },
+    "Warden": {
+      "gender": "male",
+      "aliases": [
+        "the Warden"
+      ]
+    },
+    "Moonveil": {
+      "gender": "female",
+      "aliases": [
+        "Saint Moonveil"
+      ]
+    },
+    "Eurys": {
+      "gender": "male",
+      "aliases": [
+        "Eurys of the Nine"
+      ]
+    },
+    "Helie": {
+      "gender": "female",
+      "aliases": [
+        "Saint Helie"
+      ]
+    },
+    "Beastmaster": {
+      "gender": "female",
+      "aliases": [
+        "the Beastmaster",
+        "Saint Beastmaster"
+      ]
+    },
+    "Naeve": {
+      "gender": "male",
+      "aliases": [
+        "Nightwalker",
+        "Saint Naeve"
+      ]
+    },
+    "Bloodwave": {
+      "gender": "male",
+      "aliases": [
+        "Saint Bloodwave"
+      ]
+    },
+    "Luster": {
+      "gender": "male",
+      "aliases": []
+    },
+    "Roan": {
+      "gender": "male",
+      "aliases": []
+    },
+    "Kim": {
+      "gender": "female",
+      "aliases": []
+    },
+    "Julius": {
+      "gender": "male",
+      "aliases": [
+        "Teacher Julius"
+      ]
+    },
+    "Tyris": {
+      "gender": "female",
+      "aliases": [
+        "Saint Tyris"
+      ]
+    },
+    "Aether": {
+      "gender": "male",
+      "aliases": [
+        "Saint Aether"
+      ]
+    },
+    "Madoc": {
+      "gender": "male",
+      "aliases": [
+        "Uncle Madoc",
+        "Mr. Madoc"
+      ]
+    },
+    "Lonesome Howl": {
+      "gender": "female",
+      "aliases": [
+        "Howl"
+      ]
+    },
+    "Azarax": {
+      "gender": "male",
+      "aliases": [
+        "Azarax the Mighty"
+      ]
+    },
+    "Yutra": {
+      "gender": "male",
+      "aliases": [
+        "Awakened Yutra"
+      ]
+    },
+    "Little Ling": {
+      "gender": "female",
+      "aliases": [
+        "Ling"
+      ]
+    },
+    "Pill": {
+      "gender": "male",
+      "aliases": []
+    },
+    "Noctis": {
+      "gender": "male",
+      "aliases": []
+    },
+    "Tegrot": {
+      "gender": "male",
+      "aliases": [
+        "Awakened Tegrot"
+      ]
+    },
+    "Death Singer": {
+      "gender": "female",
+      "aliases": []
+    },
+    "Beth": {
+      "gender": "female",
+      "aliases": [
+        "Bethany",
+        "Chief Bethany"
+      ]
+    },
+    "Quentin": {
+      "gender": "male",
+      "aliases": [
+        "Master Quentin"
+      ]
+    },
+    "Orum": {
+      "gender": "male",
+      "aliases": []
+    },
+    "June": {
+      "gender": "male",
+      "aliases": []
+    },
+    "The Nightmare Spell": {
+      "gender": "unknown",
+      "aliases": [
+        "the Spell"
+      ]
+    },
+    "Rit": {
+      "gender": "female",
+      "aliases": []
+    }
+  }
+}

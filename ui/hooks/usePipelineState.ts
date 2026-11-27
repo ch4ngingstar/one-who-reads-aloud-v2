@@ -14,7 +14,7 @@ export interface PipelineUIState {
   events: SSEEvent[]
   activeChId: number | null
   activeStage: Stage | null
-  ttsProgress: Record<number, { done: number; total: number }>
+  ttsProgress: Record<number, { done: number; total: number; etaSeconds?: number }>
   liveLine: LiveLine | null
   startedAt: number | null
   connected: boolean
@@ -100,7 +100,8 @@ export function pipelineReducer(s: PipelineUIState, a: PipelineAction): Pipeline
             liveLine,
             ttsProgress: {
               ...next.ttsProgress,
-              [e.chapter_id]: { done: e.lines_done ?? 0, total: e.lines_total ?? 0 },
+              [e.chapter_id]: { done: e.lines_done ?? 0, total: e.lines_total ?? 0,
+                etaSeconds: e.speech_eta_s ?? undefined },
             },
           }
         }

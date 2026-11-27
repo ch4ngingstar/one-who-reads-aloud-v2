@@ -677,6 +677,75 @@ def test_progress_callback_receives_line():
 
 # ── Runner ────────────────────────────────────────────────────────────────────
 
+def test_retry_reuses_finished_take_and_restores_chapter(tmp_path):
+    sm = StateManager(tmp_path / "retry.db")
+    cid = _seed_diarized_chapter(sm, [
+        {"line_index": i, "speaker": "Sunny", "emotion": "neutral", "text": t}
+        for i, t in enumerate(["Keep this.", "Retry me."])
+    ])
+    sm.set_voice("Sunny", str(tmp_path / "ref.wav"))
+    calls = []
+    def synth(text, *_):
+        calls.append(text)
+        if text == "Retry me." and len(calls) == 2:
+            raise ValueError("bad take")
+        return _wav_silence()
+    engine = _make_engine(sm, tmp_path, synth)
+    engine.cfg["max_retries"] = 0
+    assert engine.process_chapter(cid) == 1
+    assert sm.get_chapter_by_id(cid)["status"] == "error"
+    assert engine.process_chapter(cid) == 1
+    assert calls == ["Keep this.", "Retry me.", "Retry me."]
+    assert sm.get_chapter_by_id(cid)["status"] == "tts_done"
+    assert all(line["error_message"] is None for line in sm.get_lines_for_chapter(cid))
+
+
+def test_explicit_voice_wins_over_alias():
+    refs = {"julius": "julius.wav", "Instructor Ram": "ram.wav"}
+    assert TTSEngine._resolve_ref_audio("JULIUS", "neutral", refs) == "julius.wav"
+
+
+def test_bad_character_take_is_not_replaced_by_another_actor(tmp_path):
+    sm = StateManager(tmp_path / "cast.db")
+    cid = _seed_diarized_chapter(sm, [{"line_index": 0, "speaker": "Effie", "text": "Listen."}])
+    sm.set_voice("Effie", "effie.wav")
+    sm.set_voice("_default", "narrator.wav")
+    def render(text, ref, *_):
+        if ref == "effie.wav":
+            raise RuntimeError("bad reference")
+        return _wav_silence()
+    assert _make_engine(sm, tmp_path, render).process_chapter(cid) == 0
+    assert "bad reference" in sm.get_lines_for_chapter(cid)[0]["error_message"]
+
+
+def test_obfuscated_source_domains_are_not_read_as_dialogue():
+    assert _normalize_text("He stood. lіght~nоvel~world~c`о/m. She waited.") == "He stood. She waited."
+    assert _normalize_text("A light novel world beyond the gate.") == "A light novel world beyond the gate."
+
+
+def test_pronunciation_applies_to_whole_names_only(tmp_path):
+    sm = StateManager(tmp_path / "names.db")
+    source = "Kai met Kaira and KAI."
+    cid = _seed_diarized_chapter(sm, [{"line_index": 0, "speaker": "Narrator", "text": source}])
+    sm.set_voice("Narrator", "narrator.wav")
+    sm.set_pronunciation("Kai", "Kye")
+    calls = []
+    def synth(text, *_):
+        calls.append(text)
+        return _wav_silence()
+    _make_engine(sm, tmp_path, synth).process_chapter(cid)
+    assert calls == ["Kye met Kaira and Kye."]
+    assert sm.get_lines_for_chapter(cid)[0]["text"] == source
+
+
+def test_speech_guard_rejects_silent_and_truncated_takes():
+    from speech_audio import check_utterance
+    import pytest
+    with pytest.raises(ValueError, match="audible"):
+        check_utterance(_wav_silence(), "Hello.")
+    with pytest.raises(ValueError, match="truncated"):
+        check_utterance(_wav_silence()[:-4], "Hello.")
+
 TESTS = [
     test_emotion_vocab_all_mapped,
     test_resolve_emotion_neutral_is_pure_timbre,
