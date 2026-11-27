@@ -21,6 +21,7 @@ The labelling was rebuilt from the text up and measured against hand-checked ans
 - **Answer keys and scorer.** `scripts/label_eval.py`; two independent annotators per chapter (99.7% / 100% agreement).
 
 ### Studio
+- **New demo.** *The Bridge in the Fog*, an original scene recorded with the directed cast (eight voices, inner monologue, a whisper and a Spell message). `scripts/render_demo.py` re-records it.
 - **Start labels what you pick.** `LabelDirector` replaces the old diarizer: choose a range, press Start, and the chosen chapters are labelled, checked, stored and recorded. Chapters still carrying older labels are relabelled first.
 - **Review queue.** Inspector → *Needs review · N* lists flagged lines with the reason, the votes and one-click **✓ … is right**. Choosing a new speaker also settles the flag.
 - **Stand-in voices.** Speakers without a cast voice get a gender-matched stand-in instead of the narrator's voice.

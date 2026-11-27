@@ -1,29 +1,16 @@
 """
-Seed a pre-diarized demo chapter into the pipeline DB.
+Seed the original demo scene into the pipeline DB, already labelled by hand.
 
-Bypasses EPUB parsing and LLM diarization entirely — lines are already
-labelled with speaker + emotion, so the pipeline picks them up at the
-TTS stage directly.
+To seed AND record it with the directed cast, use:
 
-Usage (from repo root):
-    python scripts/seed_demo.py
+    python scripts/render_demo.py
 
-Then start synthesis via the UI:
-  - Project: demo_scene
-  - Chapter range: 0 – 0  (index, not ID)
+This module only holds the scene and the seeding helpers. Run on its own it seeds
+the lines (status 'diarized') without recording them:
 
-Or via the API directly:
-  POST /api/pipeline/start
-  {
-    "project_name": "demo_scene",
-    "llm_model_path": "<your model path>",
-    "tts_model_dir": "<your checkpoints dir>",
-    "chapter_range": [0, 0]
-  }
+    python scripts/seed_demo.py [--force]
 
-The orchestrator will find the project in the DB, skip EPUB parsing and
-diarization (chapter is already 'diarized'), and run TTS + assemble only.
-Output: data/output/ch_<id>.mp3
+Output of render_demo.py: data/output/demo_scene/*.mp3
 """
 
 import argparse
@@ -39,109 +26,81 @@ _DB_DEFAULT = str(Path(__file__).resolve().parent.parent / "src" / "data" / "pip
 _PROJECT_NAME = "demo_scene"
 _SOURCE_EPUB  = "demo_scene.epub"   # placeholder — orchestrator checks by stem, never opens it
 
+# An original scene written for this project (no novel text). Speakers and emotions are
+# set by hand; emotions stay within the delivery cues that won blind votes.
 _LINES = [
-    {
-        "line_index": 0,
-        "speaker":    "Narrator",
-        "emotion":    "neutral",
-        "text": (
-            "The waystation at the edge of the Pale Meridian had no walls — "
-            "just black stone pillars beneath a sky that flickered like a dying flame."
-        ),
-    },
-    {
-        "line_index": 1,
-        "speaker":    "Narrator",
-        "emotion":    "neutral",
-        "text":       "Lord Valor spread a map across the ruins of a table.",
-    },
-    {
-        "line_index": 2,
-        "speaker":    "Lord Valor",
-        "emotion":    "commanding",
-        "text": (
-            "Three convergence points. Any one of them will kill an unprepared team "
-            "in under a minute. We will not be unprepared."
-        ),
-    },
-    {
-        "line_index": 3,
-        "speaker":    "Narrator",
-        "emotion":    "neutral",
-        "text":       "Kai crouched at the northern pillar and pressed two fingers to the ground.",
-    },
-    {
-        "line_index": 4,
-        "speaker":    "Kai",
-        "emotion":    "neutral",
-        "text": (
-            "The resonance pattern is recent. Something large passed through here — "
-            "twelve hours ago, maybe less."
-        ),
-    },
-    {
-        "line_index": 5,
-        "speaker":    "Narrator",
-        "emotion":    "neutral",
-        "text":       "Effie leaned forward, her eyes bright.",
-    },
-    {
-        "line_index": 6,
-        "speaker":    "Effie",
-        "emotion":    "excited",
-        "text":       "That's not ominous at all. I love it when missions start like this.",
-    },
-    {
-        "line_index": 7,
-        "speaker":    "Narrator",
-        "emotion":    "neutral",
-        "text":       "Cassie spoke quietly from the edge of the group.",
-    },
-    {
-        "line_index": 8,
-        "speaker":    "Cassie",
-        "emotion":    "pleading",
-        "text":       "Are we sure we have to go in now? The readings could stabilize by morning.",
-    },
-    {
-        "line_index": 9,
-        "speaker":    "Narrator",
-        "emotion":    "neutral",
-        "text":       "Nephis did not turn from the horizon.",
-    },
-    {
-        "line_index": 10,
-        "speaker":    "Nephis",
-        "emotion":    "cold",
-        "text":       "They won't. By morning the window closes and we lose the season.",
-    },
-    {
-        "line_index": 11,
-        "speaker":    "Narrator",
-        "emotion":    "neutral",
-        "text":       "Sunny turned a shard of black glass over in his fingers.",
-    },
-    {
-        "line_index": 12,
-        "speaker":    "Sunny",
-        "emotion":    "sarcastic",
-        "text": (
-            "So we go in knowing there's something large already inside, "
-            "three ways to die immediately, and no way out if things go wrong."
-        ),
-    },
-    {
-        "line_index": 13,
-        "speaker":    "Narrator",
-        "emotion":    "frightened",
-        "text":       "A silence settled over the waystation like snow.",
-    },
-    {
-        "line_index": 14,
-        "speaker":    "Nephis",
-        "emotion":    "commanding",
-        "text":       "Yes. That is correct.",
-    },
+    {"line_index": 0, "speaker": "Narrator", "emotion": "neutral", "kind": "prose",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "The fog came up off the river an hour before dusk, and by nightfall the old bridge was the only thing left in the world."},
+    {"line_index": 1, "speaker": "Narrator", "emotion": "neutral", "kind": "prose",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "Sunny sat on the parapet with his back to the drop, watching the far bank through the eyes of his shadow."},
+    {"line_index": 2, "speaker": "Sunny", "emotion": "neutral", "kind": "thought",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "Nothing on the road. Nothing in the trees. Which, around here, usually means something very patient."},
+    {"line_index": 3, "speaker": "Narrator", "emotion": "neutral", "kind": "prose",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "Behind him, Effie was digging through the supply packs with the focus of a woman on a sacred quest."},
+    {"line_index": 4, "speaker": "Effie", "emotion": "laughing", "kind": "dialogue",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "Who ate the last of the dried fruit? I'm not angry. I just want to know who I'm going to be angry at."},
+    {"line_index": 5, "speaker": "Kai", "emotion": "neutral", "kind": "dialogue",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "It was you, Effie. Yesterday. You said it was for morale."},
+    {"line_index": 6, "speaker": "Effie", "emotion": "neutral", "kind": "dialogue",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "Well. Morale was very high yesterday."},
+    {"line_index": 7, "speaker": "Narrator", "emotion": "neutral", "kind": "prose",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "Nephis didn't look up from the fire. She was turning a small silver coin across her knuckles, the way she did when she was counting something only she could see."},
+    {"line_index": 8, "speaker": "Nephis", "emotion": "neutral", "kind": "dialogue",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "We cross at first light. Not before. Sunny, how far does the bridge go?"},
+    {"line_index": 9, "speaker": "Sunny", "emotion": "neutral", "kind": "dialogue",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "Farther than it should. I sent my shadow halfway across, and it still couldn't see the other end."},
+    {"line_index": 10, "speaker": "Sunny", "emotion": "neutral", "kind": "thought",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "Which is a lovely thing to learn about a bridge you're about to sleep on."},
+    {"line_index": 11, "speaker": "Narrator", "emotion": "neutral", "kind": "prose",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "Cassie had been silent all evening. Now she tilted her head, as if listening to a song no one else could hear."},
+    {"line_index": 12, "speaker": "Cassie", "emotion": "whispers", "kind": "dialogue",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "Don't light another torch. Something on the water is following the light."},
+    {"line_index": 13, "speaker": "Narrator", "emotion": "neutral", "kind": "prose",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "For a moment, nobody moved. Then Jet smiled, slow and pleased, and rested her chin on the shaft of her scythe."},
+    {"line_index": 14, "speaker": "Jet", "emotion": "cold", "kind": "dialogue",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "Good. I was getting bored."},
+    {"line_index": 15, "speaker": "Kai", "emotion": "neutral", "kind": "dialogue",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "If it's following the light, I could lead it away. It only needs to hear something worth chasing."},
+    {"line_index": 16, "speaker": "Nephis", "emotion": "neutral", "kind": "dialogue",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "No. We stay together. Cassie, how many?"},
+    {"line_index": 17, "speaker": "Cassie", "emotion": "sad", "kind": "dialogue",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "Just one. But it's very large, and very hungry, and it has been waiting under this bridge for a long, long time."},
+    {"line_index": 18, "speaker": "Narrator", "emotion": "neutral", "kind": "prose",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "Somewhere below them, the river stopped making any sound at all."},
+    {"line_index": 19, "speaker": "Sunny", "emotion": "neutral", "kind": "thought",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "Of course it has."},
+    {"line_index": 20, "speaker": "Narrator", "emotion": "neutral", "kind": "prose",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "Then a voice rang out inside each of their minds, calm and indifferent, as it always was."},
+    {"line_index": 21, "speaker": "The Nightmare Spell", "emotion": "neutral", "kind": "system",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "Beware. Something ancient has taken notice of you."},
+    {"line_index": 22, "speaker": "Sunny", "emotion": "commanding", "kind": "dialogue",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "Everyone up. Back to back. Effie, take the left."},
+    {"line_index": 23, "speaker": "Effie", "emotion": "laughing", "kind": "dialogue",
+     "attribution": {"method": "manual", "cue_indices": []},
+     "text": "Finally. Something to do."},
 ]
 
 
@@ -221,28 +180,8 @@ def main():
 
 
 def _print_instructions(project_id: int, chapter_id: int) -> None:
-    print()
-    print("=" * 55)
-    print("  Ready for TTS + assembly")
-    print("=" * 55)
-    print(f"  Project name : {_PROJECT_NAME}")
-    print(f"  Project id   : {project_id}")
-    print(f"  Chapter id   : {chapter_id}  (chapter_index = 0)")
-    print()
-    print("  Start via the UI:")
-    print(f"    Project = {_PROJECT_NAME}")
-    print(f"    Chapter range = 0 to 0")
-    print()
-    print("  Or via POST /api/pipeline/start:")
-    print('  {')
-    print(f'    "project_name":   "{_PROJECT_NAME}",')
-    print('    "llm_model_path": "<path/to/model.gguf>",')
-    print('    "tts_model_dir":  "<path/to/checkpoints>",')
-    print('    "chapter_range":  [0, 0]')
-    print('  }')
-    print()
-    print("  Output: data/output/ch_<chapter_id>.mp3")
-    print("=" * 55)
+    print(f"[seed_demo] Project '{_PROJECT_NAME}' (id {project_id}), chapter id {chapter_id}.")
+    print("[seed_demo] Record it with the directed cast:  python scripts/render_demo.py")
 
 
 if __name__ == "__main__":

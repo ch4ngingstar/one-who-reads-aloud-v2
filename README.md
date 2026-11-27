@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <b><a href="https://github.com/ch4ngingstar/one-who-reads-aloud-v2/releases/download/demo-audio/ch_0675.mp3">▶ Listen to the demo</a></b> <sub>(an original scene, 7 voices)</sub>
+  <b><a href="https://github.com/ch4ngingstar/one-who-reads-aloud-v2/releases/download/demo-audio/the-bridge-in-the-fog.mp3">▶ Listen to the demo</a></b> <sub>(an original scene, 8 voices, 2:19)</sub>
   &nbsp;·&nbsp; <a href="#quick-start">Quick start</a>
   &nbsp;·&nbsp; <a href="#how-it-works">How it works</a>
   &nbsp;·&nbsp; <a href="#measured-not-claimed">Accuracy</a>
