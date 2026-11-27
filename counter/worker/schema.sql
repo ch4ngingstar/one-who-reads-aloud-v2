@@ -1,4 +1,0 @@
-CREATE TABLE IF NOT EXISTS counters (
-  name TEXT PRIMARY KEY,
-  count INTEGER NOT NULL
-);

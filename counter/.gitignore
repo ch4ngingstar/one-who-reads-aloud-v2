@@ -1,6 +1,0 @@
-node_modules/
-.wrangler/
-__pycache__/
-.dev.vars
-art/preview/
-art/sprites/
