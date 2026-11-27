@@ -1,1 +1,2 @@
 pytest>=7.0
+Pillow>=10.0                  # counter/art sprite build and its tests

@@ -1,6 +1,13 @@
+<h1 align="center">One Who Reads Aloud</h1>
+
+<p align="center"><i>A local, full-cast audiobook studio for <b>Shadow Slave</b>: every line attributed, every character voiced.</i></p>
+
 <p align="center">
-  <img src="docs/assets/banner.svg" alt="One Who Reads Aloud — a waveform of one scene, each speaker's turn in their own colour" width="100%">
+  <!-- Soul-shard counter. After deploying counter/worker, replace the src with
+       https://soul-shard-counter.<your-subdomain>.workers.dev/@one-who-reads-aloud -->
+  <img src="docs/assets/soul-shards-cast.svg" alt="The soul-shard cast in pixel art: the Nightmare Spell, Sunny, Nephis, Cassie, Effie, Kai, Jet, Rain, Saint and Mordret, each holding a soul shard carved with a digit from 0 to 9" width="100%">
 </p>
+<p align="center"><sub>Every reader is a soul shard. Ten of the cast each hold one digit — <a href="#meet-the-cast">meet them</a>.</sub></p>
 
 <p align="center">
   <a href="https://github.com/ch4ngingstar/one-who-reads-aloud-v2/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/ch4ngingstar/one-who-reads-aloud-v2/actions/workflows/ci.yml/badge.svg"></a>
@@ -18,6 +25,12 @@
   &nbsp;·&nbsp; <a href="#measured-not-claimed">Accuracy</a>
   &nbsp;·&nbsp; <a href="CHANGELOG.md">Changelog</a>
 </p>
+
+> [!NOTE]
+> **Unofficial fan project.** *Shadow Slave* is the work of Guiltythree. This repository ships code and configuration only — no novel text, no book audio, no model weights. Bring your own EPUB.
+
+> [!IMPORTANT]
+> **Everything runs on your machine.** Labelling, voices and mixing need one NVIDIA GPU with 12 GB of VRAM and no API keys. Nothing you import leaves your computer.
 
 ---
 
@@ -206,7 +219,8 @@ src/
 ui/            Next.js studio: Forge, Voices, Inspector, Sound, Command Deck
 profiles/      cast routing, character sheet, delivery cues, voice briefs
 scripts/       labelling, casting, evaluation and export tools
-tests/         347 Python tests; ui/tests holds 54 more. No GPU needed.
+counter/      soul-shard visitor counter: pixel-art build (Python) and Cloudflare Worker
+tests/         357 Python tests; ui/tests holds 54 more. No GPU needed.
 ```
 
 ## Tests
@@ -215,6 +229,25 @@ tests/         347 Python tests; ui/tests holds 54 more. No GPU needed.
 pytest                                  # backend: models and synthesis are stubbed
 cd ui; npm test; npm run typecheck      # studio
 ```
+
+## Meet the cast
+
+The counter at the top of this page is drawn as 48 × 96 pixel art, one character per digit, each presenting the same soul shard in their own way:
+
+| | Character | Pose |
+| :-: | --- | --- |
+| **0** | The Nightmare Spell | No body: a rune plate and an empty socket. Leading zeros are the Spell, waiting. |
+| **1** | Sunny | Arms crossed, side-eye. His shadow holds the shard for him. |
+| **2** | Nephis | The shard rests in white flame on her palm; her other hand stays on her sword. |
+| **3** | Cassie | Blindfolded, fingers at her temple: the number is spoken straight into your head. |
+| **4** | Effie | The huntress, grinning, with the shard spitted on her spear tip. |
+| **5** | Kai | Hovering above his own shadow, singing, holding it up to the light. |
+| **6** | Jet | Leaning on her scythe, eyeing the shard hungrily. |
+| **7** | Rain | Bow lowered, shard caught. A tiny shadow behind her gives a thumbs-up. |
+| **8** | Saint | Kneeling, presenting it on her shield. |
+| **9** | Mordret | The shard exists only in his mirror; his real hand is empty. |
+
+The sprites are generated from code ([`counter/art`](counter/art), one shared palette and lighting pass) and served by a small Cloudflare Worker ([`counter/worker`](counter/worker)) that counts README views. See [`counter/DESIGN.md`](counter/DESIGN.md).
 
 ## Contributing
 
@@ -230,4 +263,4 @@ This repository holds code and configuration only: no novel text, no audio of th
 
 ## License
 
-[MIT](LICENSE) for the code.
+[MIT](LICENSE) for the code. The counter sprites are fan art under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/).

@@ -50,3 +50,27 @@ jobs:
 
       - name: Test
         run: npm test
+
+  counter:
+    name: Soul-shard counter worker
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: counter/worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: counter/worker/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test

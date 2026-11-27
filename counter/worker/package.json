@@ -1,0 +1,20 @@
+{
+  "name": "soul-shard-counter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "dev": "wrangler dev",
+    "publish:worker": "wrangler deploy",
+    "db:init": "wrangler d1 execute soul-shard-counter --remote --file=schema.sql",
+    "db:init:local": "wrangler d1 execute soul-shard-counter --local --file=schema.sql",
+    "preview": "vite-node scripts/preview.ts"
+  },
+  "devDependencies": {
+    "wrangler": "4.168.0",
+    "vitest": "3.2.4",
+    "typescript": "5.9.3",
+    "@cloudflare/workers-types": "5.20261123.1"
+  }
+}
