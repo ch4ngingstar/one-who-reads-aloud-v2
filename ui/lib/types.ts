@@ -34,12 +34,20 @@ export interface Chapter {
   processing_seconds: number | null
   error_message: string | null
   updated_at: string
+  /** The book's own chapter number (1994) — positions (chapter_index) are EPUB order only. */
+  chapter_number?: number | null
+  /** "Chapter 1994: Call to Arms", cleaned from the EPUB heading. */
+  display_title?: string | null
+  /** 'front' = synopsis page, 'back' = contents/credits page (never narrated). */
+  kind?: 'chapter' | 'front' | 'back' | null
 }
 
 /** Extra generation options chosen in the Setup panel, forwarded to startPipeline. */
 export interface GenOptions {
   /** 0-based [start, end] chapter_index range, inclusive — or null for the whole book. */
   chapterRange: [number, number] | null
+  /** Real chapter numbers [first, last] as printed in the book; wins over chapterRange. */
+  chapterNumbers?: [number, number] | null
   outputFormat: string
   vramCheck: boolean
   /** Master switch — layer reviewed cues under the voice at assembly time. */
@@ -56,6 +64,19 @@ export interface Voice {
 }
 
 export interface Line {
+  spoken_text?: string
+  review_reason?: string | null
+  attribution?: {
+    /** Legacy diarizer methods, 'manual', or '<labeller>:<how>' e.g. 'qwen-v1:agree'. */
+    method: 'explicit' | 'inferred' | 'exchange' | 'vocative' | 'fallback' | 'manual' | string
+    cue_indices: number[]
+    votes?: (string | null)[]
+    gender?: string
+    /** Stand-in voice for a speaker without a cast voice of their own. */
+    voice_as?: string
+  } | null
+  speaker_locked?: number
+  spoken_override?: string | null
   id: number
   line_index: number
   speaker: string
@@ -64,6 +85,10 @@ export interface Line {
   status: 'pending' | 'tts_done' | 'failed'
   audio_path: string | null
   error_message: string | null
+  performance?: {
+    start_ms: number; end_ms: number; renderer: string; fallback: boolean
+    audit: { status?: string; review?: boolean; heard?: string; reason?: string }
+  }
 }
 
 export type SfxCategory = 'ambience' | 'sfx' | 'music'
@@ -121,6 +146,7 @@ export interface SSEEvent {
   // tts_progress fields
   lines_done?: number
   lines_total?: number
+  speech_eta_s?: number | null
   /** Live line being synthesised (truncated server-side to ~200 chars). */
   text?: string
   speaker?: string

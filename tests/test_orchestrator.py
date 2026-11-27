@@ -170,6 +170,47 @@ def test_full_pipeline_three_chapters():
     print("  PASS test_full_pipeline_three_chapters")
 
 
+def test_a_director_finish_failure_marks_only_that_chapter():
+    class FinishingDirector(FakeLLMDirector):
+        def finish(self):
+            # The second chapter of the batch could not be stored.
+            return {FakeLLMDirector.processed[1]: ValueError("could not store")}
+
+    cfg = _make_config()
+    orch = PipelineOrchestrator(cfg, llm_director_cls=FinishingDirector, tts_engine_cls=FakeTTSEngine,
+                                assembler_cls=FakeAssembler, epub_parser_fn=_fake_parse_epub)
+    FakeLLMDirector.processed.clear()
+    results = orch.run()
+    assert results["success"] == 2 and results["error"] == 1
+    statuses = [c["status"] for c in orch.sm.get_all_chapters(orch._project_id)]
+    assert statuses.count("error") == 1
+
+
+def test_chapters_with_an_older_labellers_lines_are_relabelled():
+    class Relabeller(FakeLLMDirector):
+        relabels_old_labels = True
+
+    def seeded():
+        cfg = _make_config()
+        sm = StateManager(cfg.db_path)
+        pid = sm.seed_project(_fake_parse_epub(cfg.epub_path))
+        old = sm.get_all_chapters(pid)[0]["id"]
+        sm.save_diarized_lines(old, [{"line_index": 0, "speaker": "Sunny", "text": "Old label.", "kind": "dialogue"}])
+        return cfg, old
+
+    cfg, old = seeded()
+    FakeLLMDirector.processed.clear()
+    PipelineOrchestrator(cfg, llm_director_cls=Relabeller, tts_engine_cls=FakeTTSEngine,
+                         assembler_cls=FakeAssembler, epub_parser_fn=_fake_parse_epub).run()
+    assert old in FakeLLMDirector.processed
+
+    cfg, old = seeded()
+    FakeLLMDirector.processed.clear()
+    PipelineOrchestrator(cfg, llm_director_cls=FakeLLMDirector, tts_engine_cls=FakeTTSEngine,
+                         assembler_cls=FakeAssembler, epub_parser_fn=_fake_parse_epub).run()
+    assert old not in FakeLLMDirector.processed  # older directors keep existing labels
+
+
 def test_progress_events_emitted():
     events = []
     orch = _make_orch(progress_callback=events.append)
@@ -605,6 +646,10 @@ def test_stage_order_is_batched_not_interleaved():
     assert last_diarize_done < first_synth_start, (
         "Synthesis began before all diarization finished — not stage-batched"
     )
+    first_playable = next(i for i, e in enumerate(events) if e["type"] == "chapter_done")
+    synth_starts = [i for i, e in enumerate(events)
+                    if e["type"] == "stage_start" and e["stage"] == "synthesize"]
+    assert first_playable < synth_starts[1]
     print("  PASS test_stage_order_is_batched_not_interleaved")
 
 

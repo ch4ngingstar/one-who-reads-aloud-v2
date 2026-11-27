@@ -20,6 +20,19 @@ const baseProps = {
 describe('ProjectSetup sound-design controls', () => {
   beforeEach(() => vi.clearAllMocks())
 
+  it('starts with the chosen installed renderer and restored chapter range', async () => {
+    const onCreated = vi.fn()
+    render(<ProjectSetup {...baseProps} onCreated={onCreated} initialRange={[2, 2]}
+      models={{ llm: [], tts: [{ name: 'IndexTTS 2.5', path: '/new/checkpoints' }] }} />)
+    fireEvent.change(screen.getByRole('combobox', { name: 'Installed speech renderer' }),
+      { target: { value: '/new/checkpoints' } })
+    fireEvent.click(screen.getByRole('button', { name: /initialize & start/i }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalled())
+    expect(onCreated.mock.calls[0][3]).toBe('/new/checkpoints')
+    // The range is the book's own chapter numbers now; the server maps them to positions.
+    expect(onCreated.mock.calls[0][5].chapterNumbers).toEqual([2, 2])
+  })
+
   it('reveals the three category toggles only when sound design is enabled', () => {
     render(<ProjectSetup {...baseProps} onCreated={vi.fn()} />)
 

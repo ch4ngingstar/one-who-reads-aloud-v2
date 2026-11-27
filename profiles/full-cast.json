@@ -1,0 +1,11 @@
+{
+  "name": "Directed cast · OmniVoice narrator, Sunny, Anvil, Cassie, Seishan, Effie + Fish S2 Pro characters",
+  "narrator": "models/omnivoice-runtime/checkpoints",
+  "characters": "models/audio-cpp/Fish-Audio-S2-Pro-GGUF",
+  "actors": {
+    "Sunny": "models/omnivoice-runtime/checkpoints",
+    "Lord Valor": "models/omnivoice-runtime/checkpoints",
+    "Cassie": "models/omnivoice-runtime/checkpoints",
+    "Seishan": "models/omnivoice-runtime/checkpoints"
+  }
+}

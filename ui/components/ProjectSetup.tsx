@@ -1,12 +1,15 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { createProject } from '@/lib/api'
+import type { LocalModels } from '@/lib/api'
 import type { Project, Progress, GenOptions, SfxCategory } from '@/lib/types'
 import { SFX_CATEGORIES, CATEGORY_LABEL } from '@/lib/sfxCatalog'
 
 const OUTPUT_FORMATS = ['mp3', 'wav', 'flac', 'ogg'] as const
 
 interface Props {
+  models?: LocalModels
+  initialRange?: [number, number] | null
   initialEpub: string; initialLlm: string
   initialTtsDir: string; initialSpeakers: string
   onCreated: (
@@ -28,14 +31,14 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   )
 }
 
-export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, initialSpeakers, onCreated }: Props) {
+export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, initialSpeakers, onCreated, models, initialRange }: Props) {
   // epub: "remembered" uses the last-saved path; "new" shows an editable input
   const [epubMode,    setEpubMode]    = useState<'remembered' | 'new'>(initialEpub ? 'remembered' : 'new')
   const [newEpubPath, setNewEpubPath] = useState('')
   const [llmPath,  setLlmPath]  = useState(initialLlm)
   const [ttsDir,   setTtsDir]   = useState(initialTtsDir)
   const [speakers, setSpeakers] = useState(initialSpeakers)
-  const [rangeStart, setRangeStart] = useState('')   // 1-based, matches the chapter grid; empty = whole book
+  const [rangeStart, setRangeStart] = useState('')   // the book's own chapter numbers (1990); empty = whole book
   const [rangeEnd,   setRangeEnd]   = useState('')
   const [outputFormat, setOutputFormat] = useState<string>('mp3')
   const [vramCheck,    setVramCheck]    = useState(true)
@@ -50,12 +53,16 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
   useEffect(() => { setLlmPath(initialLlm) },       [initialLlm])
   useEffect(() => { setTtsDir(initialTtsDir) },     [initialTtsDir])
   useEffect(() => { setSpeakers(initialSpeakers) }, [initialSpeakers])
+  useEffect(() => {
+    setRangeStart(initialRange ? String(initialRange[0]) : '')
+    setRangeEnd(initialRange ? String(initialRange[1]) : '')
+  }, [initialRange])
 
   const effectiveEpub = epubMode === 'remembered' ? initialEpub : newEpubPath
   const epubFilename  = initialEpub.split(/[\\/]/).pop() ?? initialEpub
 
-  /** Build the 0-based [start, end] chapter_index range from the 1-based form inputs. */
-  function resolveChapterRange(): [number, number] | null {
+  /** The [first, last] real chapter numbers from the form inputs (the server maps them). */
+  function resolveChapterNumbers(): [number, number] | null {
     const s = rangeStart.trim(), e = rangeEnd.trim()
     if (!s && !e) return null   // whole book
     const start = s ? parseInt(s, 10) : 1
@@ -63,7 +70,7 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
     if (!Number.isFinite(start) || !Number.isFinite(end)) throw new Error('Chapter range must be whole numbers')
     if (start < 1 || end < 1) throw new Error('Chapter numbers start at 1')
     if (start > end) throw new Error('Chapter range: "From" must be ≤ "To"')
-    return [start - 1, end - 1]   // → 0-based chapter_index, inclusive
+    return [start, end]   // real chapter numbers, inclusive
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -72,13 +79,13 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
       const epub = effectiveEpub.trim()
       if (!epub) { setError('EPUB path is required'); setLoading(false); return }
       const speakerList = speakers.split(',').map(s => s.trim()).filter(Boolean)
-      const chapterRange = resolveChapterRange()   // throws on invalid input → caught below
+      const chapterNumbers = resolveChapterNumbers()   // throws on invalid input → caught below
       const result = await createProject({
         epub_path: epub, llm_model_path: llmPath.trim(),
         tts_model_dir: ttsDir.trim(), speakers: speakerList,
       })
       onCreated(result.project, result.progress, llmPath.trim(), ttsDir.trim(), speakerList, {
-        chapterRange, outputFormat, vramCheck, sfxEnabled, sfxCategories,
+        chapterRange: null, chapterNumbers, outputFormat, vramCheck, sfxEnabled, sfxCategories,
       }, epub)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
@@ -143,6 +150,8 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
       {/* Model paths */}
       <Field label="LLM Model" hint=".gguf">
         <input
+          aria-label="LLM model path"
+          list="local-llm-models"
           className="input"
           placeholder="models/Qwen3-14B-Q4_K_M.gguf"
           value={llmPath}
@@ -150,10 +159,22 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
           required
           spellCheck={false}
         />
+        <datalist id="local-llm-models">
+          {models?.llm.map(path => <option key={path} value={path} />)}
+        </datalist>
       </Field>
 
-      <Field label="IndexTTS2 Model Dir" hint="checkpoints">
+      <Field label="Speech renderer" hint="local checkpoints">
+        {Boolean(models?.tts.length) && (
+          <select aria-label="Installed speech renderer" className="input"
+            value={models?.tts.some(model => model.path === ttsDir) ? ttsDir : ''}
+            onChange={e => setTtsDir(e.target.value)}>
+            {models?.tts.map(model => <option key={model.path} value={model.path}>{model.name}</option>)}
+            <option value="">Custom checkpoint directory</option>
+          </select>
+        )}
         <input
+          aria-label="Speech checkpoint directory"
           className="input"
           placeholder="index-tts/checkpoints"
           value={ttsDir}
@@ -166,13 +187,13 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
       <div className="divider" />
 
       {/* Speakers */}
-      <Field label="Speakers" hint="comma-separated">
+      <Field label="Speakers" hint="blank uses the full novel cast">
         <input
           className="input"
           value={speakers}
           onChange={e => setSpeakers(e.target.value)}
           spellCheck={false}
-          placeholder="Sunny, Nephis, Cassie…"
+          placeholder="Full cast"
         />
         {/* Speaker chips */}
         {speakerList.length > 0 && (
@@ -192,8 +213,8 @@ export default function ProjectSetup({ initialEpub, initialLlm, initialTtsDir, i
         <div className="flex-1 weaver-thread" />
       </div>
 
-      {/* Chapter range — 1-based, matches the chapter grid; blank = whole book */}
-      <Field label="Chapter Range" hint="optional · whole book if blank">
+      {/* Chapter range — the book's own chapter numbers; blank = whole book */}
+      <Field label="Chapters" hint="book numbers, e.g. 1990 → 1999 · blank = whole book">
         <div className="flex items-center gap-2">
           <input
             className="input"

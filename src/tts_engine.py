@@ -50,16 +50,16 @@ OUTPUT FILES:
 """
 
 import gc
-import io
 import os
 import re
 import tempfile
-import wave as _wave_mod
 from pathlib import Path
 from typing import Callable, Optional
 
 
-from state_manager import StateManager
+from state_manager import StateManager, _resolve_stored_path
+from index25_worker import Index25Worker
+from casting import SPEAKER_ALIASES, choose_voice
 
 
 # ── Emotion → IndexTTS2 vector map ────────────────────────────────────────────
@@ -104,136 +104,6 @@ INDEXTTS2_EMOTION_VECTORS: dict[str, "tuple[list[float], float]"] = {
 }
 
 
-# ── Speaker alias dictionary ──────────────────────────────────────────────────
-# Maps every title / alias the LLM may output → the canonical voice key.
-# Keys MUST be in Title Case (matching the .strip().title() normalisation below).
-SPEAKER_ALIASES: dict[str, str] = {
-    # Sunny & his many titles
-    "Sunless":            "Sunny",
-    "Lost From Light":    "Sunny",
-    "Lord Of Shadows":    "Sunny",
-    "The Shopkeeper":     "Sunny",
-    "Master Sunless":     "Sunny",
-    "Shadow":             "Sunny",
-    "Treacherous Shadow": "Sunny",
-    "Mongrel":            "Sunny",
-    "Devil Of Antarctica":"Sunny",
-    "Weaver'S Heir":      "Sunny",   # title() turns ' → 'S
-
-    # The Divine Cohort
-    "Neph":               "Nephis",
-    "Changing Star":      "Nephis",
-    "Light":              "Nephis",
-    "Lady Nephis":        "Nephis",
-    "Saint Nephis":       "Nephis",
-
-    "Cassia":             "Cassie",
-    "Song Of The Fallen": "Cassie",
-    "Blind Girl":         "Cassie",
-    "Seer":               "Cassie",
-    "Saint Cassia":       "Cassie",
-
-    "Athena":             "Effie",
-    "Raised By Wolves":   "Effie",
-    "Saint Effie":        "Effie",
-
-    "Nightingale":        "Kai",
-    "Master Kai":         "Kai",
-    "Saint Kai":          "Kai",
-
-    "Soul Reaper":        "Jet",
-    "Master Jet":         "Jet",
-    "Saint Jet":          "Jet",
-    "Boss":               "Jet",
-
-    "Prince Of Nothing":  "Mordret",
-
-    # The Sovereigns & Clan Leaders
-    "Anvil":              "Lord Valor",
-    "King Anvil":         "Lord Valor",
-    "King Of Swords":     "Lord Valor",
-    "Lord Of Swords":     "Lord Valor",
-    "Anvil Of Valor":     "Lord Valor",
-
-    "Ki Song":            "Queen Ki Song",
-    "Queen Of Beasts":    "Queen Ki Song",
-    "Queen Of Song":      "Queen Ki Song",
-
-    # Domain War Saints & Legacies
-    "Morgan Of Valor":    "Morgan",
-    "Princess Morgan":    "Morgan",
-    "Saint Morgan":       "Morgan",
-
-    "Sky Tide":           "Tyris",
-    "Saint Tyris":        "Tyris",
-
-    "Saint Roan":         "Roan",
-
-    "Saint Beastmaster":  "Beastmaster",
-
-    "Revel":              "Revel Of Song",
-    "Dirge":              "Revel Of Song",
-    "Saint Revel":        "Revel Of Song",
-
-    # The Godgrave Cohort
-    "Tamar":              "Tamar Of Sorrow",
-    "Lady Tamar":         "Tamar Of Sorrow",
-
-    # Lore & Entities
-    "Weaver":             "The Nightmare Spell",
-    "The Spell":          "The Nightmare Spell",
-    "System":             "The Nightmare Spell",
-    "Spell":              "The Nightmare Spell",
-
-    "Eurys":              "Eurys Of The Nine",
-
-    # Academy / Past Mentors
-    "Ram":                "Instructor Ram",
-    "Julius":             "Instructor Ram",
-    "Teacher Julius":     "Instructor Ram",
-
-    # NPC Archetypes (LLM fallback tags)
-    "Npc_Male":           "The Hardened Awakened",
-    "Npc_Female":         "The Bureaucrat",
-    "Npc_Noble":          "The Legacy Noble",
-    "Npc_Wanderer":       "The Dream Realm Wanderer",
-    "Npc_Monster":        "The Nightmare Abomination",
-    "Unknown":            "_default",
-
-    # Post-Vol-9 character title variants (canonical names added to DEFAULT_SPEAKERS).
-    "Saint Jest":         "Jest",
-
-    # Post-Vol-8 cast (vol9-11). Roster names map to the registered voice keys.
-    "Naeve":              "Saint Naeve",
-    "Nightwalker":        "Saint Naeve",   # "the Nightwalker" is Naeve's epithet
-    "The Nightwalker":    "Saint Naeve",
-    "Bloodwave":          "Saint Bloodwave",
-    "Detective Sunless":  "Sunny",         # Sunny's undercover identity (vol10 Mirage arc)
-    "Sir Sunless":        "Sunny",
-    "Princess Moonveil":  "Moonveil",      # epithet -> registered Moonveil clip
-    "Warden Of Valor":    "Warden",        # epithet -> registered Warden clip
-
-    # Corrupted / monster entities
-    "Abomination":        "The Nightmare Abomination",
-    "Corrupted":          "The Nightmare Abomination",
-    "The Abomination":    "The Nightmare Abomination",
-    "Monster":            "The Nightmare Abomination",
-    "Nightmare Creature": "The Nightmare Abomination",
-    "Void Creature":      "The Nightmare Abomination",
-    "Corrupted Being":    "The Nightmare Abomination",
-    "Shadow Creature":    "The Nightmare Abomination",
-    "Hollow":             "The Nightmare Abomination",
-    "Corrupted One":      "The Nightmare Abomination",
-    "Fallen":             "The Nightmare Abomination",
-    "Awakened Monster":   "The Nightmare Abomination",
-    "Great Monster":      "The Nightmare Abomination",
-    "Creature":           "The Nightmare Abomination",
-    "Fiend":              "The Nightmare Abomination",
-    "Demon":              "The Nightmare Abomination",
-    "Scavenger":          "The Nightmare Abomination",
-}
-
-
 # ── Default IndexTTS2 config ──────────────────────────────────────────────────
 _DEFAULT_CFG = {
     # use_fp16=False (full precision) measurably improves naturalness — half
@@ -262,98 +132,15 @@ _DEFAULT_CFG = {
     # Passed straight to IndexTTS2.infer().
     "max_text_tokens_per_segment": 200,
     "num_beams":      1,
-    "db_flush_every": 10,   # write tts_done updates to DB every N lines (resume granularity)
+    "db_flush_every": 1,    # checkpoint every expensive GPU inference
 }
 
 
-# Non-speech stage directions the LLM occasionally emits inside asterisks.
-# These are deleted; any other *emphasised* text keeps its content.
-_STAGE_DIRECTION_RE = re.compile(
-    r'\*(?:sighs?|pauses?|laughs?|chuckles?|giggles?|groans?|grunts?|gasps?|'
-    r'coughs?|snorts?|scoffs?|hums?|exhales?|inhales?|sniffs?|sobs?|'
-    r'clears throat|beat|silence)\*',
-    re.IGNORECASE,
-)
+from spoken_text import normalize_text as _normalize_text, split_for_speech
 
 
-def _normalize_text(text: str) -> str:
-    """
-    Clean up text for maximum TTS accuracy.
-    Fixes Unicode typography, normalises whitespace, and handles
-    common novel formatting that confuses speech synthesisers.
-    """
-    # Unicode quotes → ASCII
-    text = text.replace('“', '"').replace('”', '"')
-    text = text.replace('‘', "'").replace('’', "'")
-    # Strip italic/emphasis markers but keep their content. Only a known
-    # vocabulary of LLM stage directions is removed outright — a generic
-    # "any lowercase word" rule would delete legitimately emphasised words
-    # like *enormous* from the narration.
-    text = _STAGE_DIRECTION_RE.sub('', text)                  # *sighs* → gone
-    text = re.sub(r'\*([^*]{1,120})\*', r'\1', text)          # *inner thought* → inner thought
-    # Strip square brackets but KEEP their content (e.g. [Aspect of the Void]).
-    text = re.sub(r'\[([^\]]*)\]', r'\1', text)
-    # Em-dash handling: mid-word interruption → ellipsis; mid-sentence → comma
-    text = re.sub(r'(\w)—$', r'\1...', text)
-    text = re.sub(r'(\w)—(\w)', r'\1, \2', text)
-    text = text.replace('—', ', ')
-    # En-dash → spaced hyphen
-    text = text.replace('–', ' - ')
-    # Horizontal ellipsis → three dots
-    text = text.replace('…', '...')
-    # Non-breaking space → regular space
-    text = text.replace(' ', ' ')
-    # Strip zero-width chars
-    text = text.replace('​', '').replace('﻿', '')
-    # Abbreviations (before punctuation normalization)
-    for _pat, _rep in [
-        (r'\bDr\.', 'Doctor'), (r'\bMr\.', 'Mister'), (r'\bMrs\.', 'Missus'),
-        (r'\bMs\.', 'Miss'), (r'\bSt\.', 'Saint'), (r'\bvs\.', 'versus'),
-        (r'\bapprox\.', 'approximately'), (r'\betc\.', 'and so on'),
-    ]:
-        text = re.sub(_pat, _rep, text)
+from speech_audio import concat_wavs, wav_silence as _wav_silence
 
-    # Ordinal numbers
-    for _abbr, _word in [
-        ('1st','first'),('2nd','second'),('3rd','third'),('4th','fourth'),
-        ('5th','fifth'),('6th','sixth'),('7th','seventh'),('8th','eighth'),
-        ('9th','ninth'),('10th','tenth'),('11th','eleventh'),('12th','twelfth'),
-    ]:
-        text = re.sub(r'\b' + re.escape(_abbr) + r'\b', _word, text, flags=re.IGNORECASE)
-
-    # Symbols
-    text = re.sub(r'(\d+)\s*%', r'\1 percent', text)
-    text = re.sub(r'\$(\d+)', r'\1 dollars', text)
-
-    # Collapse multiple spaces / dangling punctuation from stripped markers
-    text = re.sub(r' {2,}', ' ', text)
-    text = re.sub(r'[,;]\s*$', '.', text)
-    text = re.sub(r'(\w)$', lambda m: m.group(1) + '.', text)
-    return text.strip()
-
-
-def _wav_silence(duration_ms: int = 100, sample_rate: int = 22050) -> bytes:
-    """Generate a minimal silent WAV file as a fallback placeholder."""
-    import struct
-    n_samples = int(sample_rate * duration_ms / 1000)
-    data = b"\x00\x00" * n_samples  # 16-bit silence
-    data_size = len(data)
-    header = struct.pack(
-        "<4sI4s4sIHHIIHH4sI",
-        b"RIFF", 36 + data_size, b"WAVE",
-        b"fmt ", 16,
-        1,                    # PCM
-        1,                    # mono
-        sample_rate,
-        sample_rate * 2,      # byte rate
-        2,                    # block align
-        16,                   # bits per sample
-        b"data", data_size,
-    )
-    return header + data
-
-
-# ── Main class ────────────────────────────────────────────────────────────────
 
 class TTSEngine:
     """
@@ -396,11 +183,13 @@ class TTSEngine:
 
     def __enter__(self):
         self._load_model()
-        print("[tts] IndexTTS2 engine ready.")
+        print("[tts] Speech engine ready.")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         # Free the model and reclaim VRAM.
+        if isinstance(self.model, Index25Worker):
+            self.model.close()
         self.model = None
         gc.collect()
         try:
@@ -421,13 +210,20 @@ class TTSEngine:
                 "Clone: git clone https://github.com/index-tts/index-tts\n"
                 "Weights: hf download IndexTeam/IndexTTS-2 --local-dir checkpoints"
             )
-        model_dir = self.model_dir.resolve()
+        model_dir = _resolve_stored_path(self.model_dir).resolve()
         cfg_path = model_dir / self.cfg["config_name"]
         if not cfg_path.exists():
             raise FileNotFoundError(
                 f"IndexTTS2 config not found: {cfg_path}. "
                 "Point model_dir at the checkpoints dir containing config.yaml."
             )
+        import yaml
+        version = str(yaml.safe_load(cfg_path.read_text(encoding="utf-8")).get("version", "2.0"))
+        if version == "2.5":
+            self.model = Index25Worker(model_dir)
+            return
+        if version not in {"2", "2.0"}:
+            raise ValueError(f"Unsupported IndexTTS checkpoint version {version} in {cfg_path}")
         # Tell HuggingFace to use the local cache only — no network checks.
         # infer_v2 calls hf_hub_download / from_pretrained for w2v-bert-2.0,
         # amphion/MaskGCT, and funasr/campplus; these succeed from cache but
@@ -471,9 +267,16 @@ class TTSEngine:
         """
         lines     = self.sm.get_pending_tts_lines(chapter_id)
         voice_map = self.sm.get_voice_map()
+        readings = {name.casefold(): reading for name, reading in self.sm.get_pronunciations().items()}
+        pronunciations = None
+        if readings:
+            alternatives = "|".join(re.escape(word) for word in sorted(readings, key=len, reverse=True))
+            pronunciations = re.compile(r"(?<!\w)(?:" + alternatives + r")(?!\w)", re.IGNORECASE)
 
         if not lines:
             print(f"[tts] No pending lines for chapter_id={chapter_id}.")
+            if self.sm.get_line_progress(chapter_id)["total"] == 0:
+                raise ValueError(f"Chapter {chapter_id} has no labelled lines to synthesize.")
             self.sm.mark_chapter_status(chapter_id, "tts_done")
             return 0
 
@@ -488,9 +291,8 @@ class TTSEngine:
         for processed, line in enumerate(lines, start=1):
             audio_path = ch_dir / f"line_{line['line_index']:04d}.wav"
 
-            ref_path = self._resolve_ref_audio(
-                line["speaker"], line["emotion"], voice_map
-            )
+            choice = choose_voice(line["speaker"], line["emotion"], voice_map)
+            ref_path = choice.path
             if ref_path is None:
                 # Only reachable when NO voices are registered at all — a hard
                 # config error, not a per-line skip. _resolve_ref_audio always
@@ -506,21 +308,15 @@ class TTSEngine:
                     progress_callback(processed, total, line)
                 continue
 
-            # Note when the line landed on the _default voice (uses the same
-            # alias normalisation as _resolve_ref_audio so the flag is accurate).
-            _norm      = line["speaker"].strip().title()
-            _canonical = SPEAKER_ALIASES.get(_norm, _norm)
-            using_fallback = (
-                f"{_canonical}_{line['emotion']}" not in voice_map
-                and _canonical not in voice_map
-            )
-
-            raw_text              = _normalize_text(line["text"])
+            spoken_text = line["text"]
+            if pronunciations:
+                spoken_text = pronunciations.sub(lambda m: readings.get(m[0].casefold(), m[0]), spoken_text)
+            raw_text              = _normalize_text(spoken_text)
             emo_vector, emo_alpha = self._resolve_emotion(line["emotion"])
             emo_alpha            *= self.cfg["emo_alpha_scale"]
             # Keep narration measured — damp the narrator's emotional intensity so
             # charged prose (e.g. frightened horror description) never over-acts.
-            if _canonical == "Narrator":
+            if choice.canonical == "Narrator":
                 emo_alpha *= self.cfg["narrator_emo_scale"]
 
             max_chars = self.cfg["max_line_chars"]
@@ -529,56 +325,34 @@ class TTSEngine:
                 print(f"[tts]   SPLIT line {line['line_index']:>4}: "
                       f"{len(segments)} segments ({len(raw_text)} chars)")
 
-            # Try the resolved voice; if every retry fails, fall back to a
-            # guaranteed voice so a corrupt/odd ref clip can never drop a line.
-            # A line only ends up failed if the engine itself fails on BOTH
-            # voices (e.g. OOM/crash) — never for a content/mapping reason.
-            fallback_path  = self._fallback_ref(voice_map)
-            ref_candidates = [ref_path]
-            if fallback_path and fallback_path != ref_path:
-                ref_candidates.append(fallback_path)
-
-            wav_bytes = None
-            last_err  = None
-            for cand_idx, cand_ref in enumerate(ref_candidates):
-                for attempt in range(self.cfg["max_retries"] + 1):
-                    try:
-                        if len(segments) == 1:
-                            wav_bytes = self._synthesize(
-                                segments[0], cand_ref, emo_vector, emo_alpha
-                            )
-                        else:
-                            parts = [
-                                self._synthesize(seg, cand_ref, emo_vector, emo_alpha)
-                                for seg in segments
-                            ]
-                            wav_bytes = self._concat_wavs(parts)
-                        break
-                    except Exception as e:
-                        last_err = e
-                        print(f"[tts]   Retry {attempt + 1}/{self.cfg['max_retries']} "
-                              f"line {line['line_index']:>4}: {e}")
-                if wav_bytes:
-                    if cand_idx > 0:
-                        print(f"[tts]   FALLBACK line {line['line_index']:>4}: "
-                              "resolved voice failed all retries, "
-                              "synthesised on fallback voice")
-                    break
+            try:
+                parts = [self._render_segment(segment, ref_path, emo_vector, emo_alpha)
+                         for segment in segments]
+                wav_bytes = parts[0] if len(parts) == 1 else self._concat_wavs(parts)
+            except Exception as exc:
+                wav_bytes = None
+                error = f"{line['speaker']} (line {line['line_index']}): {exc}"
+                self.sm.mark_line_failed(line["id"], error)
+                print(f"[tts]   ERR {error}")
 
             if wav_bytes:
-                audio_path.write_bytes(wav_bytes)
+                stage_path = None
+                try:
+                    with tempfile.NamedTemporaryFile(dir=ch_dir, suffix=".part", delete=False) as tmp:
+                        stage_path = Path(tmp.name)
+                        tmp.write(wav_bytes)
+                    stage_path.replace(audio_path)
+                finally:
+                    if stage_path:
+                        stage_path.unlink(missing_ok=True)
                 _pending_db.append((line["id"], str(audio_path)))
                 success_count += 1
                 if len(_pending_db) >= self.cfg["db_flush_every"]:
                     self.sm.mark_lines_tts_done(_pending_db)
                     _pending_db.clear()
-                fallback_note = " [_default]" if using_fallback else ""
+                fallback_note = " [_default]" if choice.fallback else ""
                 print(f"[tts]   OK  line {line['line_index']:>4}  [{line['speaker']:<12}] "
                       f"{line['emotion']:<12}{fallback_note} -> {audio_path.name}")
-            else:
-                self.sm.mark_line_failed(line["id"], str(last_err))
-                print(f"[tts]   ERR line {line['line_index']:>4}: {last_err}")
-
             if progress_callback:
                 progress_callback(processed, total, line)
 
@@ -586,6 +360,10 @@ class TTSEngine:
             self.sm.mark_lines_tts_done(_pending_db)
             _pending_db.clear()
 
+        if success_count < total:
+            message = f"{total - success_count}/{total} lines failed. Start again to retry those lines."
+            self.sm.mark_chapter_status(chapter_id, "error", error_message=f"[failed_stage:synthesize] {message}")
+            return success_count
         self.sm.mark_chapter_status(chapter_id, "tts_done")
         print(f"[tts] Chapter {chapter_id} done: "
               f"{success_count}/{total} lines synthesised.")
@@ -604,122 +382,29 @@ class TTSEngine:
             return None, 0.0
         return vec, alpha
 
-    @staticmethod
-    def _split_long_line(text: str, max_chars: int) -> list:
-        """Split text at sentence boundaries when it exceeds max_chars.
-        A single sentence longer than max_chars is hard-split at the last
-        comma (or space) before the limit so no segment can overflow."""
-        if len(text) <= max_chars:
-            return [text]
+    _split_long_line = staticmethod(split_for_speech)
 
-        def hard_split(sent: str) -> list:
-            parts = []
-            while len(sent) > max_chars:
-                cut = sent.rfind(',', max_chars // 2, max_chars)
-                if cut != -1:
-                    head, sent = sent[:cut + 1], sent[cut + 1:]   # keep the comma
-                else:
-                    cut = sent.rfind(' ', max_chars // 2, max_chars)
-                    if cut != -1:
-                        head, sent = sent[:cut], sent[cut + 1:]
-                    else:
-                        head, sent = sent[:max_chars], sent[max_chars:]
-                parts.append(head.strip())
-                sent = sent.strip()
-            if sent:
-                parts.append(sent)
-            return parts
+    _concat_wavs = staticmethod(concat_wavs)
 
-        units: list = []
-        for sent in re.split(r'(?<=[.!?])\s+', text):
-            if len(sent) > max_chars:
-                units.extend(hard_split(sent))
-            else:
-                units.append(sent)
-
-        chunks, cur = [], ""
-        for unit in units:
-            if cur and len(cur) + 1 + len(unit) <= max_chars:
-                cur += " " + unit
-            else:
-                if cur:
-                    chunks.append(cur)
-                cur = unit
-        if cur:
-            chunks.append(cur)
-        return chunks or [text]
+    def _render_segment(self, text, ref_path, emo_vector, emo_alpha) -> bytes:
+        if not any(char.isalnum() for char in text):
+            return _wav_silence(250)
+        # Retry only the bad segment, always using the selected character.
+        attempts = max(1, int(self.cfg["max_retries"]) + 1)
+        for attempt in range(1, attempts + 1):
+            try:
+                audio = self._synthesize(text, ref_path, emo_vector, emo_alpha)
+                if not audio:
+                    raise ValueError("Renderer returned no audio")
+                return audio
+            except Exception as exc:
+                if attempt == attempts:
+                    raise
+                print(f"[tts]   Repeating segment after attempt {attempt}/{attempts}: {exc}")
 
     @staticmethod
-    def _concat_wavs(wav_list: list) -> bytes:
-        """Concatenate multiple WAV byte strings into a single WAV."""
-        buf = io.BytesIO()
-        with _wave_mod.open(buf, "wb") as out:
-            for i, raw in enumerate(wav_list):
-                with _wave_mod.open(io.BytesIO(raw), "rb") as src:
-                    if i == 0:
-                        out.setparams(src.getparams())
-                    out.writeframes(src.readframes(src.getnframes()))
-        return buf.getvalue()
-
-    @staticmethod
-    def _extract_path(entry) -> str:
-        """Voice-map entries are {'path':..,'ref_text':..} dicts (or bare path
-        strings in the legacy format). Return the path either way."""
-        if isinstance(entry, dict):
-            return entry["path"]
-        return entry
-
-    @staticmethod
-    def _fallback_ref(voice_map: dict) -> "str | None":
-        """Guaranteed non-skip fallback chain so a line is NEVER dropped for lack
-        of a mapped voice: _default → Narrator → any registered voice (chosen
-        deterministically by sorting). Returns None ONLY when voice_map is empty —
-        a true config error (no voices registered at all)."""
-        for key in ("_default", "Narrator"):
-            if key in voice_map:
-                return TTSEngine._extract_path(voice_map[key])
-        for key in sorted(voice_map):
-            return TTSEngine._extract_path(voice_map[key])
-        return None
-
-    @staticmethod
-    def _resolve_ref_audio(
-        speaker: str,
-        emotion: str,
-        voice_map: dict,
-    ) -> "str | None":
-        """
-        Resolve the ref_audio_path for a speaker + emotion.
-
-        Resolution order:
-          1. Normalise raw speaker string (strip + Title Case).
-          2. Check SPEAKER_ALIASES → remap to canonical voice key.
-          3. Try "{canonical}_{emotion}" in voice_map (legacy emotion clips).
-          4. Try "{canonical}" in voice_map.
-          5. Fall back via _fallback_ref (_default → Narrator → any voice).
-
-        A line is NEVER skipped for a missing mapping — unmapped speakers always
-        land on a real voice. None is returned ONLY when no voices are registered
-        at all (voice_map empty), which the caller treats as a hard config error.
-        """
-        normalised = speaker.strip().title()
-        canonical = SPEAKER_ALIASES.get(normalised, normalised)
-
-        if canonical != "_default":
-            emotion_key = f"{canonical}_{emotion}"
-            if emotion_key in voice_map:
-                return TTSEngine._extract_path(voice_map[emotion_key])
-            if canonical in voice_map:
-                return TTSEngine._extract_path(voice_map[canonical])
-            print(
-                f"[tts]   WARN   No voice for '{speaker}' "
-                f"(normalised: '{normalised}', canonical: '{canonical}') "
-                f"-- using fallback voice. Add to SPEAKER_ALIASES if recurring."
-            )
-        else:
-            print(f"[tts]   ALIAS  '{speaker}' -> fallback voice (NPC/Unknown)")
-
-        return TTSEngine._fallback_ref(voice_map)
+    def _resolve_ref_audio(speaker: str, emotion: str, voice_map: dict) -> "str | None":
+        return choose_voice(speaker, emotion, voice_map).path
 
     # ── Raw synthesis call (injectable for testing) ───────────────────────────
 
@@ -748,7 +433,7 @@ class TTSEngine:
         tmp.close()
         try:
             infer_kwargs = dict(
-                spk_audio_prompt=ref_audio_path,
+                spk_audio_prompt=str(_resolve_stored_path(ref_audio_path)),
                 text=text,
                 output_path=tmp.name,
                 verbose=False,
@@ -761,8 +446,10 @@ class TTSEngine:
 
             self.model.infer(**infer_kwargs)
 
-            with open(tmp.name, "rb") as f:
-                return f.read()
+            from speech_audio import check_utterance
+            audio = Path(tmp.name).read_bytes()
+            check_utterance(audio, text)
+            return audio
         finally:
             try:
                 os.unlink(tmp.name)

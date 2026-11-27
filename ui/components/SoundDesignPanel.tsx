@@ -1,5 +1,6 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
+import { chapterName, chapterNumberLabel } from '@/lib/format'
 import {
   getSfx, getCues, putCues, generateCuesCloud, importCues, cuesExportUrl,
   type DiarizeProvider,
@@ -153,7 +154,7 @@ export default function SoundDesignPanel({ chapter, onChanged }: {
   return (
     <div className="flex-1 overflow-y-auto p-5 min-h-0">
       <div className="font-display text-[15px] tracking-[1.5px] text-ink-primary leading-snug">
-        Ch. {chapter.chapter_index + 1} — {chapter.title}
+        Ch. {chapterNumberLabel(chapter)} — {chapterName(chapter)}
       </div>
       <div className="text-[10px] tracking-[0.18em] uppercase text-spell-g5 mt-1 flex items-center gap-2">
         {chapter.status}

@@ -1,6 +1,8 @@
 # Advisor Plans Index
 
-Audit anchored at commit `3831319`. All plans written 2026-06-14.
+**Current audiobook architecture:** start with [010 · Production design and Sol handoff](010-production-design.md). It incorporates the partially implemented director work and supersedes 009's model selection order. Use 009 for additional listening-test detail.
+
+Plans 001–008 were written June 14, 2026 at `3831319`. For character dialogue quality, start with [plan 009 and its copy-ready Sol prompt](009-dialogue-quality.md), written November 11 against the working tree at `7cb6bd4`. Its listening test precedes any production renderer change.
 
 ## Status
 
@@ -14,6 +16,9 @@ Audit anchored at commit `3831319`. All plans written 2026-06-14.
 | 006 | [db-connection-batching](006-db-connection-batching.md) | perf | P3 | M | MED | TODO |
 | 007 | [per-line-inspection-api](007-per-line-inspection-api.md) | direction | P2 | S | LOW | TODO |
 | 008 | [batch-chapter-reset](008-batch-chapter-reset.md) | direction | P3 | S | LOW | TODO |
+| 009 | [Character dialogue and director evaluation](009-dialogue-quality.md) | architecture | P1 | M–L | MED | TODO |
+| 010 | [Production design and Sol handoff](010-production-design.md) | architecture | P1 | L | MED | IN PROGRESS (WP3 done; per-character engines by blind vote) |
+| 011 | [Pipeline study, fixes and additions](011-pipeline-study.md) | study | P1 | M | LOW | DONE (pending the owner's three listening votes) |
 
 Update the `Status` column as you execute each plan: `TODO → IN PROGRESS → DONE` (or `BLOCKED: reason`).
 

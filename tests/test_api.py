@@ -53,10 +53,10 @@ def _make_tiny_wav(path: Path) -> Path:
 
 
 def _make_valid_wav(path: Path) -> Path:
-    """Create a WAV large enough to pass the 10 KB upload guard (~22 KB, 0.5 s)."""
+    """Make a three-second audible PCM fixture for reference uploads."""
     with wave.open(str(path), "wb") as wf:
         wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(22050)
-        wf.writeframes(b"\x00\x00" * 11025)
+        wf.writeframes((b"\x00\x04" * 25 + b"\x00\xfc" * 25) * 1323)
     return path
 
 
@@ -212,18 +212,79 @@ def test_upload_voice():
     with tempfile.TemporaryDirectory() as tmp:
         wav_path = _make_valid_wav(Path(tmp) / "test.wav")
 
-        with open(wav_path, "rb") as f:
+        from unittest.mock import patch
+        with patch("api._VOICES_DIR", Path(tmp) / "refs"), open(wav_path, "rb") as f:
             r = client.post(
                 "/api/voices/upload",
                 data={"speaker": "Nephis"},
                 files={"file": ("nephis.wav", f, "audio/wav")},
             )
+        original = sm.get_voice_map()["Nephis"]["path"]
+        with patch("api._VOICES_DIR", Path(tmp) / "refs"):
+            result = client.post("/api/voices/upload", data={"speaker": "Nephis"},
+                                 files={"file": ("short.wav", _make_tiny_wav(Path(tmp) / "bad.wav").read_bytes())})
+        assert result.status_code == 400
+        assert sm.get_voice_map()["Nephis"]["path"] == original
+        assert Path(original).is_file()
 
     assert r.status_code == 201
     data = r.json()
     assert data["speaker"] == "Nephis"
     assert "nephis" in data["ref_audio_path"].lower()
     print("  PASS test_upload_voice")
+
+
+def test_retry_via_ui_keeps_finished_takes():
+    sm = _tmp_sm()
+    pid = _seed_project(sm)
+    cid = sm.get_all_chapters(pid)[0]["id"]
+    sm.save_diarized_lines(cid, [{"line_index": 0, "text": "Keep me.", "speaker": "Narrator"}])
+    line = sm.get_pending_tts_lines(cid)[0]
+    sm.mark_line_tts_done(line["id"], "take.wav")
+    sm.mark_chapter_status(cid, "error", error_message="[failed_stage:synthesize] interrupted")
+    client, _, _ = _make_client(sm=sm)
+    assert client.post(f"/api/chapters/{cid}/reset?retry=true").status_code == 200
+    assert sm.get_chapter_by_id(cid)["status"] == "diarized"
+    assert sm.get_lines_for_chapter(cid)[0]["audio_path"] == "take.wav"
+
+
+def test_inspector_recast_keeps_master_and_other_line_revisions(tmp_path):
+    sm = _tmp_sm()
+    cid = sm.get_all_chapters(_seed_project(sm))[0]["id"]
+    sm.save_diarized_lines(cid, [{"line_index": i, "text": t, "speaker": "Narrator"}
+                                 for i, t in enumerate(["Come in.", "The door opened."])])
+    sm.set_voice("Effie", str(tmp_path / "effie.wav"))
+    existing = tmp_path / "published.mp3"
+    existing.write_bytes(b"master")
+    sm.mark_chapter_status(cid, "complete", audio_path=str(existing))
+    client, _, mgr = _make_client(sm=sm)
+    url = f"/api/chapters/{cid}/record?line_index=0&speaker=Effie"
+    mgr.status = "running"
+    assert client.post(url).status_code == 409
+    mgr.status = "idle"
+    assert client.post(url.replace("Effie", "Missing")).status_code == 422
+    assert client.post(url).status_code == 200
+    assert sm.get_chapter_by_id(cid)["output_audio_path"] == str(existing)
+    assert existing.read_bytes() == b"master"
+    rows = client.get(f"/api/chapters/{cid}/lines").json()["lines"]
+    assert [(r["speaker"], r["take_revision"]) for r in rows] == [("Effie", 1), ("Narrator", 0)]
+
+
+def test_flagged_speaker_is_settled_by_confirming_or_recasting(tmp_path):
+    sm = _tmp_sm()
+    cid = sm.get_all_chapters(_seed_project(sm))[0]["id"]
+    flag = "Speaker unsure: a second opinion picked June instead of Kim."
+    sm.save_diarized_lines(cid, [{"line_index": i, "text": t, "speaker": "Kim", "review_reason": flag}
+                                 for i, t in enumerate(["Welcome.", "Sit down."])])
+    sm.set_voice("Effie", str(tmp_path / "effie.wav"))
+    client, _, _ = _make_client(sm=sm)
+    assert client.post(f"/api/chapters/{cid}/lines/9/confirm").status_code == 404
+    assert client.post(f"/api/chapters/{cid}/lines/0/confirm").status_code == 200
+    assert client.post(f"/api/chapters/{cid}/record?line_index=1&speaker=Effie").status_code == 200
+    rows = client.get(f"/api/chapters/{cid}/lines").json()["lines"]
+    # Confirming keeps the take (revision 0); recasting re-records it.
+    assert [(r["speaker"], r["review_reason"], r["speaker_locked"], r["take_revision"]) for r in rows] == [
+        ("Kim", None, 1, 0), ("Effie", None, 1, 1)]
 
 
 def test_delete_voice():
@@ -754,6 +815,38 @@ def _cleanup():
 
 # ── Runner ────────────────────────────────────────────────────────────────────
 
+
+def test_audiobook_export_runs_in_background_and_serves_the_file(tmp_path=None):
+    import tempfile as _tf
+    from api import get_exports
+    from book_export import BookExports
+    folder = Path(tmp_path or _tf.mkdtemp())
+
+    def fake_runner(db, project, out, log):
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        Path(out).write_bytes(b"m4b" * 100)
+        return {"chapters": 3, "missing": 0, "hours": 0.1, "file": str(out)}
+
+    exports = BookExports(folder / "books", runner=fake_runner)
+    app.dependency_overrides[get_exports] = lambda: exports
+    client, sm, _ = _make_client()
+    pid = _seed_project(sm)
+    assert client.get(f"/api/projects/{pid}/audiobook").json()["state"] == "idle"
+    assert client.get(f"/api/projects/{pid}/audiobook/file").status_code == 404
+    started = client.post(f"/api/projects/{pid}/audiobook")
+    assert started.status_code == 202 and started.json()["state"] == "running"
+    import time as _time
+    for _ in range(100):
+        status = client.get(f"/api/projects/{pid}/audiobook").json()
+        if status["state"] != "running":
+            break
+        _time.sleep(0.02)
+    assert status["state"] == "done" and status["chapters"] == 3
+    download = client.get(f"/api/projects/{pid}/audiobook/file")
+    assert download.status_code == 200 and download.content == b"m4b" * 100
+    assert client.post("/api/projects/9999/audiobook").status_code == 404
+    app.dependency_overrides.pop(get_exports, None)
+
 TESTS = [
     test_health,
     test_get_project_not_found,
@@ -798,6 +891,7 @@ TESTS = [
     test_cues_cloud_review_lock_conflict,
     test_cues_import_raw_payload,
     test_cues_export_shape,
+    test_audiobook_export_runs_in_background_and_serves_the_file,
 ]
 
 if __name__ == "__main__":

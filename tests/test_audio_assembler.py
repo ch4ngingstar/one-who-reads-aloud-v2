@@ -61,8 +61,8 @@ def _seed_chapter_with_tts_lines(sm, n_lines=3):
     return pid, ch_id
 
 
-def _make_assembler(sm, output_dir, mock_ffmpeg=True):
-    asm = AudioAssembler(sm, output_dir)
+def _make_assembler(sm, output_dir, mock_ffmpeg=True, cfg=None):
+    asm = AudioAssembler(sm, output_dir, cfg=cfg)
     if mock_ffmpeg:
         asm._check_ffmpeg = lambda: None
         def fake_run(list_path, out_path):
@@ -120,7 +120,7 @@ def test_build_concat_list_single_line():
                   "audio_path": "/audio/ch_0001/line_0000.wav"}]
 
         asm = AudioAssembler.__new__(AudioAssembler)
-        asm.cfg = dict(_DEFAULT_CFG)
+        asm.cfg = {**_DEFAULT_CFG, "pacing": "legacy"}  # fixed gaps under test
 
         content = asm._build_concat_list(lines, silence_paths)
         entries = [l for l in content.splitlines() if l.strip()]
@@ -145,7 +145,7 @@ def test_build_concat_list_same_speaker_uses_short_gap():
         ]
 
         asm = AudioAssembler.__new__(AudioAssembler)
-        asm.cfg = dict(_DEFAULT_CFG)
+        asm.cfg = {**_DEFAULT_CFG, "pacing": "legacy"}  # fixed gaps under test
 
         content = asm._build_concat_list(lines, silence_paths)
         entries = content.splitlines()
@@ -171,7 +171,7 @@ def test_build_concat_list_speaker_change_uses_long_gap():
         ]
 
         asm = AudioAssembler.__new__(AudioAssembler)
-        asm.cfg = dict(_DEFAULT_CFG)
+        asm.cfg = {**_DEFAULT_CFG, "pacing": "legacy"}  # fixed gaps under test
 
         content = asm._build_concat_list(lines, silence_paths)
         entries = content.splitlines()
@@ -195,7 +195,7 @@ def test_build_concat_list_three_lines_correct_entry_count():
         ]
 
         asm = AudioAssembler.__new__(AudioAssembler)
-        asm.cfg = dict(_DEFAULT_CFG)
+        asm.cfg = {**_DEFAULT_CFG, "pacing": "legacy"}  # fixed gaps under test
 
         content = asm._build_concat_list(lines, silence_paths)
         entries = content.splitlines()
@@ -256,7 +256,10 @@ def test_assemble_chapter_creates_output_file():
         result = asm.assemble_chapter(ch_id)
 
         assert Path(result).exists()
-        assert "ch_" in Path(result).name
+        # Named after the book's chapter, not the database id. "Ch 1" carries no chapter
+        # number, so the id keeps the name unique; the folder is the project.
+        assert Path(result).name == f"Ch 1 [{ch_id}].mp3"
+        assert Path(result).parent.name == "test"
         assert Path(result).name.endswith(".mp3")
 
     chapter = sm.get_all_chapters(pid)[0]
@@ -281,6 +284,10 @@ def test_assemble_chapter_skips_failed_lines():
         sm.mark_line_failed(lines[3]["id"], "error")
 
         asm = _make_assembler(sm, out_dir)
+        import pytest
+        with pytest.raises(RuntimeError, match="only 3/4"):
+            asm.assemble_chapter(ch_id)
+        asm.cfg["min_completion_ratio"] = 0.75  # explicitly allow a partial export
         result = asm.assemble_chapter(ch_id)
 
         assert Path(result).exists()
@@ -371,7 +378,9 @@ def test_assemble_chapter_ffmpeg_receives_correct_list():
             captured_list[0] = list_path.read_text(encoding="utf-8")
             out_path.write_bytes(b"FAKE" * 1025)  # >4096 bytes to pass size check
 
-        asm = _make_assembler(sm, out_dir, mock_ffmpeg=False)
+        # Legacy pacing concatenates the recorded takes themselves (natural pacing
+        # lists edge-trimmed copies; see test_pacing.py).
+        asm = _make_assembler(sm, out_dir, mock_ffmpeg=False, cfg={"pacing": "legacy"})
         asm._check_ffmpeg = lambda: None
         asm._run_ffmpeg   = capture_run
         asm.assemble_chapter(ch_id)

@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dialogue listening audition</title>
+<style>
+  :root { color-scheme: dark; font: 16px/1.55 system-ui, sans-serif; background: #14181c; color: #eceeea; }
+  * { box-sizing: border-box; }
+  body { max-width: 920px; margin: 3rem auto; padding: 0 1.25rem 3rem; }
+  h1 { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.1; }
+  p { max-width: 72ch; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; padding: 1rem 0; }
+  button { cursor: pointer; }
+  button, select, textarea { color: inherit; font: inherit; border: 1px solid #647477; border-radius: .4rem; padding: .35rem .6rem; background: #151e22; }
+  button.primary { background: #c6e7d2; color: #142721; font-weight: 650; }
+  :focus-visible { outline: 2px solid #c6e7d2; outline-offset: 2px; }
+  #status { color: #c6e7d2; margin: 0; }
+  fieldset { min-width: 0; margin: 1.35rem 0; border: 1px solid #52636b; border-radius: .7rem; background: #222a30; padding: 1.3rem; }
+  legend { font-size: 1.22rem; font-weight: 700; padding: 0 .5rem; }
+  .clips { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 1.1rem; }
+  audio, textarea { width: 100%; display: block; margin-top: .35rem; }
+  audio.error { outline: 2px solid #f7a99b; border-radius: 30px; }
+  .ratings { overflow-x: auto; margin: 1rem 0; }
+  table { border-collapse: collapse; width: 100%; }
+  th { text-align: left; font-weight: 600; }
+  th, td { padding: .4rem .65rem .4rem 0; border-bottom: 1px solid #52636b; }
+  select { min-width: 5.3rem; }
+  .notes { display: block; }
+</style>
+</head>
+<body data-pack="__PACK_ID__">
+<h1>Dialogue listening audition</h1>
+<p>Play A and B, then choose the version that sounds more natural, better matches the character, or better fits the exchange. Use Tie if both work equally well and Neither if both miss the mark. Leave any rating blank if you’re unsure.</p>
+<div class="actions">
+  <button type="button" class="primary" id="download">Download choices</button>
+  <button type="button" id="restore">Import choices</button>
+  <input type="file" id="file" accept=".json,application/json" hidden>
+  <span id="progress"></span>
+</div>
+<p id="status" role="status"></p>
+<form id="votes">
+__COMPARISONS__
+</form>
+<noscript>Enable JavaScript to save your choices.</noscript>
+<script>
+  const form = document.querySelector("#votes");
+  const packId = document.body.dataset.pack;
+  const storageKey = "dialogue-listening-v1:" + packId;
+  const fields = [...form.querySelectorAll("fieldset")];
+  const status = document.querySelector("#status");
+  const file = document.querySelector("#file");
+  const progress = document.querySelector("#progress");
+  const outcomes = new Set(["", "A", "B", "tie", "neither"]);
+
+  function snapshot() {
+    return {
+      version: 1,
+      pack_id: packId,
+      saved_at: new Date().toISOString(),
+      comparisons: Object.fromEntries(fields.map(field => [
+        field.dataset.id,
+        Object.fromEntries([...field.querySelectorAll("select, textarea")].map(input => [
+          input.name, input.value
+        ]))
+      ]))
+    };
+  }
+
+  function restore(data) {
+    if (data.version !== 1 || data.pack_id !== packId || !data.comparisons) {
+      throw new Error("These choices belong to a different listening pack.");
+    }
+    const updates = [];
+    for (const field of fields) {
+      const answers = data.comparisons[field.dataset.id];
+      for (const input of field.querySelectorAll("select, textarea")) {
+        const value = answers?.[input.name];
+        if (typeof value !== "string" || (input.tagName === "SELECT" && !outcomes.has(value))) {
+          throw new Error("The saved choices are incomplete or invalid.");
+        }
+        updates.push([input, value]);
+      }
+    }
+    for (const [input, value] of updates) input.value = value;
+    updateProgress();
+  }
+
+  function updateProgress() {
+    const rated = fields.filter(field => field.querySelector('select[name="overall:overall"]').value).length;
+    progress.textContent = rated + " of " + fields.length + " comparisons with an overall vote";
+  }
+
+  function save() {
+    updateProgress();
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(snapshot()));
+      status.textContent = "Choices saved in this browser. Download a copy to keep or share.";
+    } catch {
+      status.textContent = "Browser storage is unavailable. Download a copy to keep your choices.";
+    }
+  }
+
+  updateProgress();
+  try {
+    const saved = localStorage.getItem(storageKey);
+    if (saved) restore(JSON.parse(saved));
+    status.textContent = saved
+      ? "Restored your saved choices. Download a copy to keep or share."
+      : "Choices save in this browser as you go. Download a copy to keep or share.";
+  } catch {
+    status.textContent = "Browser choices could not be loaded. You can import a downloaded copy.";
+  }
+
+  form.addEventListener("input", save);
+  form.addEventListener("change", save);
+  document.addEventListener("play", event => {
+    if (event.target.tagName !== "AUDIO") return;
+    for (const audio of document.querySelectorAll("audio")) {
+      if (audio !== event.target) audio.pause();
+    }
+  }, true);
+  form.addEventListener("error", event => {
+    if (event.target.tagName !== "AUDIO") return;
+    event.target.classList.add("error");
+    status.textContent = "An audio file failed to load. Keep the audio folder beside this page.";
+  }, true);
+
+  document.querySelector("#download").addEventListener("click", () => {
+    const content = JSON.stringify(snapshot(), null, 2);
+    const url = URL.createObjectURL(new Blob([content], {type: "application/json"}));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "listening-choices-" + packId + ".json";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+  document.querySelector("#restore").addEventListener("click", () => file.click());
+  file.addEventListener("change", async () => {
+    if (!file.files.length) return;
+    try {
+      const imported = JSON.parse(await file.files[0].text());
+      const hasVotes = [...form.querySelectorAll("select, textarea")].some(input => input.value);
+      if (hasVotes && !window.confirm("Replace the choices on this page with the imported copy?")) return;
+      restore(imported);
+      save();
+    } catch (error) {
+      status.textContent = error instanceof SyntaxError ? "Choose a valid choices JSON file." : error.message;
+    } finally {
+      file.value = "";
+    }
+  });
+</script>
+</body>
+</html>

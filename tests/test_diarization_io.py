@@ -140,7 +140,7 @@ def test_import_enforcement_parity_with_llm():
                           "emotion": raw[s["index"]][1]} for s in segs]}
     dio.import_labels(sm, ch_id, labels)
     got = [{"line_index": ln["line_index"], "speaker": ln["speaker"],
-            "text": ln["text"], "emotion": ln["emotion"]}
+            "text": ln["text"], "emotion": ln["emotion"], "kind": ln["kind"]}
            for ln in sm.get_lines_for_chapter(ch_id)]
 
     assert got == expected, f"parity broken:\n  llm={expected}\n  imp={got}"

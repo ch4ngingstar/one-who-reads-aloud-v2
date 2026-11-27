@@ -36,6 +36,8 @@ from ebooklib import epub
 from bs4 import BeautifulSoup
 import spacy
 
+from text_cleanup import scrub
+
 
 # ── Chunking constants ────────────────────────────────────────────────────────
 # Target keeps LLM prompts comfortably within context window
@@ -102,11 +104,15 @@ def _strip_html(html_bytes: bytes) -> tuple[str, list[str]]:
 
     paragraphs = []
     for p in soup.find_all("p"):
-        text = re.sub(r"\s+", " ", p.get_text(separator=" ", strip=True))
+        # Inline markup is not a word boundary (Sun<em>less</em>, "don't").
+        for br in p.find_all("br"):
+            br.replace_with(" ")
+        # Scraper watermarks ("…novelfire.net") would otherwise be read aloud.
+        text = scrub(re.sub(r"\s+", " ", p.get_text()).strip())
         # Keep anything containing letters — short dramatic lines ("No.",
         # "Run!") are real story content. Drop only decorative separators
         # (***, ---, ◆◆◆) and empty paragraphs.
-        if text and re.search(r"[A-Za-z]", text):
+        if any(char.isalnum() for char in text):
             paragraphs.append(text)
 
     return title, paragraphs

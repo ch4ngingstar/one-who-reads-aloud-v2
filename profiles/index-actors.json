@@ -1,0 +1,5 @@
+{
+  "name": "OmniVoice narration + IndexTTS 2.5 actors (previous default)",
+  "narrator": "models/omnivoice-runtime/checkpoints",
+  "characters": "models/indextts25-runtime/checkpoints"
+}

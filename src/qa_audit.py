@@ -31,10 +31,7 @@ from pathlib import Path
 from typing import Optional
 
 from state_manager import StateManager, _resolve_stored_path
-# SPEAKER_ALIASES is the only part of voice resolution that drifts; import it
-# directly so the pre-flight check stays faithful to real TTS behavior. The
-# heavy indextts import in tts_engine is lazy (inside a method), so this is cheap.
-from tts_engine import SPEAKER_ALIASES
+from casting import choose_voice
 
 
 # ── Severity ──────────────────────────────────────────────────────────────────
@@ -83,25 +80,10 @@ class AuditReport:
 # ── Voice resolution (quiet mirror of TTSEngine._resolve_ref_audio) ────────────
 
 def _resolve_category(speaker: str, emotion: str, voice_map: dict) -> str:
-    """
-    Classify how a (speaker, emotion) would resolve at TTS time, WITHOUT the
-    side-effecting prints of the real resolver:
-      "mapped"   — a dedicated voice (emotion clip or canonical) exists
-      "fallback" — only the _default voice would catch it (quality risk)
-      "unmapped" — nothing resolves; the line would be silently skipped
-    Mirrors the 3-tier lookup in TTSEngine._resolve_ref_audio.
-    """
-    normalised = speaker.strip().title()
-    canonical  = SPEAKER_ALIASES.get(normalised, normalised)
-
-    if canonical == "_default":
-        return "mapped" if "_default" in voice_map else "unmapped"
-
-    if f"{canonical}_{emotion}" in voice_map or canonical in voice_map:
-        return "mapped"
-    if "_default" in voice_map:
-        return "fallback"
-    return "unmapped"
+    choice = choose_voice(speaker, emotion, voice_map)
+    if choice.path is None:
+        return "unmapped"
+    return "fallback" if choice.fallback else "mapped"
 
 
 # ── ffprobe ────────────────────────────────────────────────────────────────────
