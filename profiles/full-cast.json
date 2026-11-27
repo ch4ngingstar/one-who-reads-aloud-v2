@@ -1,5 +1,5 @@
 {
-  "name": "Directed cast · OmniVoice narrator, Sunny, Anvil, Cassie, Seishan, Effie + Fish S2 Pro characters",
+  "name": "Directed cast · OmniVoice narrator, Sunny, Anvil, Cassie, Seishan + Fish S2 Pro characters",
   "narrator": "models/omnivoice-runtime/checkpoints",
   "characters": "models/audio-cpp/Fish-Audio-S2-Pro-GGUF",
   "actors": {
