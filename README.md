@@ -1,159 +1,233 @@
-<h1 align="center">One Who Reads Aloud</h1>
-
-<p align="center"><em>Turns the Shadow Slave web novel into a multi-voice audiobook — every character cloned, every line acted.</em></p>
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="One Who Reads Aloud — a waveform of one scene, each speaker's turn in their own colour" width="100%">
+</p>
 
 <p align="center">
-  <a href="https://github.com/ch4ngingstar/one-who-reads-aloud-v2/actions/workflows/ci.yml">
-    <img alt="CI" src="https://github.com/ch4ngingstar/one-who-reads-aloud-v2/actions/workflows/ci.yml/badge.svg">
-  </a>
+  <a href="https://github.com/ch4ngingstar/one-who-reads-aloud-v2/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/ch4ngingstar/one-who-reads-aloud-v2/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/ch4ngingstar/one-who-reads-aloud-v2/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/ch4ngingstar/one-who-reads-aloud-v2?style=flat-square&color=7c6cff"></a>
   <img alt="license: MIT" src="https://img.shields.io/badge/license-MIT-3a3a3a?style=flat-square">
-  <img alt="python 3.11" src="https://img.shields.io/badge/python-3.11-3a3a3a?style=flat-square">
-  <img alt="Next.js 15" src="https://img.shields.io/badge/next.js-15-3a3a3a?style=flat-square">
-  <img alt="TTS: IndexTTS2" src="https://img.shields.io/badge/tts-IndexTTS2-3a3a3a?style=flat-square">
   <img alt="100% local" src="https://img.shields.io/badge/runs-100%25_local-3a3a3a?style=flat-square">
+  <img alt="one 12 GB GPU" src="https://img.shields.io/badge/GPU-one_12_GB_card-3a3a3a?style=flat-square">
+  <img alt="speaker accuracy on held-out chapters: 94.6% automatic, 98.6% after review" src="https://img.shields.io/badge/speakers-94.6%25_auto_·_98.6%25_reviewed-5fd0c3?style=flat-square">
 </p>
-
-A local pipeline that turns the *Shadow Slave* web novel into a multi-voice audiobook. Feed it an EPUB and it produces chapter MP3s where every character speaks in their own cloned voice, and every line is delivered with an emotion chosen by an LLM. The whole thing runs on a single consumer GPU — no APIs, no cloud, nothing leaves your machine.
 
 <p align="center">
-  <a href="https://github.com/ch4ngingstar/one-who-reads-aloud-v2/releases/download/demo-audio/ch_0675.mp3"><strong>Listen to the demo</strong></a> — 7 voices, original scene, ~2 min.
+  <b><a href="https://github.com/ch4ngingstar/one-who-reads-aloud-v2/releases/download/demo-audio/ch_0675.mp3">▶ Listen to the demo</a></b> <sub>(an original scene, 7 voices)</sub>
+  &nbsp;·&nbsp; <a href="#quick-start">Quick start</a>
+  &nbsp;·&nbsp; <a href="#how-it-works">How it works</a>
+  &nbsp;·&nbsp; <a href="#measured-not-claimed">Accuracy</a>
+  &nbsp;·&nbsp; <a href="CHANGELOG.md">Changelog</a>
 </p>
+
+---
+
+**One Who Reads Aloud** is a local, full-cast audiobook studio built for the *Shadow Slave* web novel. It imports an EPUB, works out who speaks each line and how, routes every character to a voice chosen by blind listening tests, checks the recorded takes with Whisper, and exports chapter MP3s or chaptered M4B volumes. It runs on one NVIDIA GPU with 12 GB of VRAM, with no API keys and no cloud processing.
+
+> The hard part of a full-cast audiobook is not the voices; it is knowing *who is speaking*. This project measures that, and shows you the lines it is unsure about.
+
+## Highlights
+
+| | |
+|---|---|
+| 🎭 **A real cast** | The narrator and Sunny, Cassie, Anvil and Seishan are recorded with OmniVoice; every other character with Fish S2 Pro. Each casting choice won a blind listening test. Speakers without a voice of their own get a stand-in of the right gender, never the narrator. |
+| 🔍 **Attribution with review** | A local Qwen3-14B labels every quote in two independent passes; Gemma 3, a different model family, checks it. On held-out chapters, lines where all three agree were **98.4%** right, and **16.7%** of lines were flagged for review (9.7% across 80 real chapters). |
+| 📖 **The whole text** | Chapters are read straight from the EPUB, recovering paragraphs an older parser had dropped. «Guillemets», mixed quote marks and unclosed quotes are understood, and site watermarks ("novelfire.net" in small capitals) are removed before anyone reads them aloud. |
+| 🎚️ **Studio finish** | Whisper reads takes back and retakes clear misreads; actors are levelled to a common loudness; pauses follow paragraphs and turns of conversation; files carry real chapter numbers and titles; volumes export as M4B with chapter marks. |
+| 🧰 **One button** | Pick a book and a chapter range in the app and press Start. Labelling, checking, recording and mixing run in order with one model on the GPU at a time. Interrupted runs continue chapter by chapter. |
+
+<details>
+<summary><b>Screenshots</b></summary>
 
 ![UI demo — Command Deck · live pipeline run · per-line inspector](docs/screenshots/demo.gif)
 
-<details>
-<summary>More screenshots</summary>
-
-**Live pipeline run** — chapter progress, VRAM transitions, per-line TTS log:
+**Live pipeline run**: chapter progress, VRAM transitions, per-line log.
 
 ![Live run](docs/screenshots/live-run.png)
 
-**Inspector panel** — every line labelled with speaker and emotion by the LLM, colour-coded and scrollable before synthesis begins:
+**Inspector**: every line with its speaker and emotion; flagged lines first, one click to confirm or recast.
 
-![Inspector — per-line speaker and emotion](docs/screenshots/live-inspector-seeded.png)
+![Inspector](docs/screenshots/live-inspector-seeded.png)
 
 </details>
 
-## How it works
+## Measured, not claimed
 
-Each chapter moves through four stages, orchestrated by a FastAPI backend and monitored live from a Next.js UI over SSE:
+Accuracy is measured against hand-checked answer keys. Each chapter was labelled independently by two annotators who agreed on 99.7% and 100% of speakers; the few disagreements were settled by reading the text. The **held-out** chapters were never used while tuning the system.
+
+| Speaker attribution | Held-out (7 ch, 294 quotes) | Development (8 ch, 314 quotes) |
+| --- | ---: | ---: |
+| Previous labeller, 50-line spot check | ~60% | — |
+| Qwen alone, fully automatic | 94.6% | 96.5% |
+| **Lines where Qwen's two blind votes and Gemma agree** | **98.4%** | **99.6%** |
+| Lines flagged for review | 16.7% | 9.6% |
+| After the flagged lines are checked by hand | 98.6% | 99.7% |
+
+The 50-line spot check is a different, smaller sample and is shown only for scale. On 80 unlabelled chapters of volume 8 the review flag rate was 9.7%.
+
+**Emotion** is scored against the same keys: 92–97% of lines receive an emotion the annotators listed as acceptable. The four emotions that change a recording (whispering, laughing, coldness, command) are used only when the narration says so ("she whispered", "he chuckled").
+
+`scripts/label_eval.py` computes every number above. The answer keys contain the novel's text, so they stay on the author's machine; the script and its format are here to build your own.
+
+### A line's journey
+
+An invented passage, traced through the system:
+
+> Rain stared at the dark cottage. Her teacher sighed.
+>
+> "Come inside."
+
+| Step | Result |
+| --- | --- |
+| Evidence | The action before the quote belongs to *her teacher*, which in Rain's chapters means **Sunny** (268 of 278 uses in volumes 8–11). |
+| Candidates | Sunny, Rain, Ray, someone unnamed |
+| Qwen, pass 1 / pass 2 (options reversed) | Sunny / Sunny |
+| Gemma, blind | Sunny |
+| Verdict | Sunny, not flagged; recorded with Sunny's OmniVoice reference, neutral delivery |
+
+Had any vote differed, the line would carry *"Speaker unsure: …"* in the Inspector with a one-click **✓ Sunny is right** or a speaker menu.
+
+## How it works
 
 ```mermaid
 flowchart LR
-    epub([EPUB]) --> parse["parse<br/>M1"] --> diarize["diarize<br/>M3 · LLM"] --> tts["synthesize<br/>M4 · TTS"] --> asm["assemble<br/>M5 · FFmpeg"] --> mp3([ch_XXXX.mp3])
-    db[("SQLite (M2)<br/>single source of truth")]
-    parse -.-> db
-    diarize -.-> db
-    tts -.-> db
-    asm -.-> db
+    A[EPUB] --> B[Clean text<br/>restore · scrub · split quotes]
+    B --> C[Evidence<br/>tags · he/she · beats · who's present]
+    C --> D[Qwen3-14B<br/>two blind votes]
+    D -->|votes split| E[Qwen reasons]
+    D --> F[Gemma 3<br/>blind second opinion]
+    E --> F
+    F --> G[Script + review flags]
+    G --> H[Score: voice, emotion, pacing]
+    H --> I[OmniVoice · Fish S2 Pro]
+    I --> J[Whisper read-back]
+    J -->|misread| I
+    J --> K[Level, mix, tag]
+    K --> L[Chapter MP3 · volume M4B]
 ```
 
-1. **Parse** — chapters are extracted from the EPUB and seeded into SQLite.
-2. **Diarize** — a local Qwen3-14B (GGUF, llama.cpp) assigns a speaker and an emotion to every line. This is a two-pass design: a deterministic Python segmenter splits the text into dialogue / system-notification / prose segments, then the LLM only emits labels for them, locked to a GBNF grammar. The model never reproduces the chapter text, so it physically cannot drop or mangle words. (The first version asked the LLM to echo everything back as JSON. It lost sentences, leaked JSON fragments into spoken audio, and was four times slower. See [docs/design/llm-diarizer-v2.md](docs/design/llm-diarizer-v2.md) for the post-mortem and design.)
-3. **Synthesize** — IndexTTS2 clones each character's voice from a single reference clip. Emotion doesn't need separate clips: the LLM's emotion tag is mapped to IndexTTS2's 8-dim emotion vector (`happy, angry, sad, afraid, disgust, melancholic, surprised, calm`) and passed per line, so one clean neutral recording per character is enough.
-4. **Assemble** — per-line WAVs are concatenated into a chapter MP3 with FFmpeg. CPU only.
+1. **Clean text.** Chapters come from the EPUB with every paragraph intact. A position-based quote scanner handles « », '…" and quotes that run to the paragraph end, and flags the ones it cannot settle.
+2. **Evidence.** Rules read each quote the way a careful reader does: "X said", "*she* said:" (and who *she* is), the action just before the line ("Morgan laughed."), names used to address someone, who is in the scene, unnamed people ("Ling's dad", "one of the porters"), and characters known by description ("her teacher" is Sunny in Rain's chapters). Genders, aliases and epithets live in [`profiles/characters.json`](profiles/characters.json).
+3. **Two votes, one second opinion.** Qwen chooses from a short candidate list twice, the second time without seeing the first answer and with the options reversed. Gemma votes without seeing either. Each model loads once per batch and reads the chapter from a prefix cache, so each question costs only a few hundred tokens.
+4. **Record.** Each line becomes a cue: who, how, which engine, which reference clip. OmniVoice and Fish S2 Pro record their parts in separate passes; Whisper transcribes every take and retakes misreads.
+5. **Mix.** Actors are levelled, pauses follow the text's shape, and the chapter is exported with ID3 tags and a timed script. Change one line's speaker in the Inspector and only that line is re-recorded.
 
-Chapters track their own status (`pending → diarized → tts_done → assembled → complete`), so a stopped or crashed run resumes exactly where it left off — a chapter that already has diarization skips straight to TTS.
+## Quick start
 
-### The 12 GB problem
-
-The LLM needs ~9 GB of VRAM and IndexTTS2 needs ~8 GB. The machine has 12. They can never be loaded at the same time, so the orchestrator runs them strictly sequentially: diarize a chapter, unload the LLM, poll `nvidia-smi` until usage actually drops below 1 GB (CUDA frees memory lazily), then load the TTS engine. Both models live inside context managers that guarantee unload on exit, even on error.
-
-## Requirements
-
-- Windows (the launcher scripts are PowerShell; the backend itself is portable)
-- Python 3.11, Node 18+
-- FFmpeg in `PATH`
-- An NVIDIA GPU with ~12 GB VRAM
-- ~20 GB of disk for model weights
-
-## Setup
+**You need:** Windows 10/11, an NVIDIA GPU with 12 GB VRAM, Python 3.11, Node 18+, FFmpeg on `PATH`, about 30 GB of disk for models.
 
 ```powershell
-# Python deps
+git clone https://github.com/ch4ngingstar/one-who-reads-aloud-v2.git
+cd one-who-reads-aloud-v2
 pip install -r requirements.txt
-
-# llama-cpp-python with CUDA (the PyPI default is CPU-only)
 pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124 --no-cache-dir
-
-# IndexTTS2 — installed from source, weights from HF (~8 GB)
-git clone https://github.com/index-tts/index-tts
-cd index-tts; pip install -e .; cd ..
-hf download IndexTeam/IndexTTS-2 --local-dir index-tts/checkpoints
-
-# Diarization model (~9 GB)
-hf download Qwen/Qwen3-14B-GGUF Qwen3-14B-Q4_K_M.gguf --local-dir models
-
-# Frontend
 cd ui; npm install; cd ..
 ```
 
-On Windows, `deepspeed` usually fails to build — that's fine, the TTS engine runs without it.
-
-## Running
+**Models** (all local, all downloaded once):
 
 ```powershell
-.\start.ps1
+# Labeller and second opinion
+hf download Qwen/Qwen3-14B-GGUF Qwen3-14B-Q4_K_M.gguf --local-dir models
+hf download bartowski/google_gemma-3-12b-it-GGUF google_gemma-3-12b-it-Q4_K_M.gguf --local-dir models
+
+# Character voices: Fish S2 Pro (Q8_0 GGUF) served by audio.cpp
+hf download audio-cpp/audio.cpp-gguf Fish-Audio-S2-Pro-GGUF/fish-audio-s2-pro-q8_0.gguf --local-dir models/audio-cpp
+#   then unpack the audio.cpp v0.9.4 Windows Vulkan build into models/audio-runtime/
+
+# Narration: OmniVoice in its own environment
+.\scripts\setup_omnivoice.ps1
 ```
 
-This starts the backend (port 8000) and the UI (port 3000) in separate windows and opens the browser. From the UI: create a project from your EPUB, map characters to voice reference clips (one clean ~10 s neutral clip per character — no transcript needed, IndexTTS2 clones from audio alone), and start the pipeline. Assembled MP3s land in `data/output/`.
-
-Backend and frontend can also be run separately:
+**Run:**
 
 ```powershell
-cd src; python -m uvicorn api:app --port 8000 --reload
-cd ui;  npm run dev
+.\start.bat
 ```
 
-## Diarizing without the local LLM (external / Claude API)
+The launcher starts the backend and the UI and opens the studio. In **Forge**, choose an EPUB (any folder; a copy is kept in `data/input/`) and a chapter range, then press **Start**. Upload or audition voices in **Voices**. Review flagged lines in **Inspector → Needs review**. Export a volume as M4B from the chapter list.
 
-If you can't — or would rather not — run the local 14&nbsp;GB diarization model (limited VRAM, unreliable power), label chapters elsewhere and import the result. The text always stays verbatim from the EPUB; the external source only supplies **speaker + emotion**, applied by segment index, and runs through the same safety net as the local LLM.
+<details>
+<summary><b>Command-line tools</b></summary>
+
+| Command | What it does |
+| --- | --- |
+| `python scripts/label_book.py --from 1841 --to 1860` | Label, double-check and store a chapter range outside the app (resumable). |
+| `python scripts/label_eval.py score data/labels/<run>` | Score a labelling run against the answer keys. |
+| `python scripts/cast.py discover \| screen \| apply` | Find characters who need voices, screen designed candidates, apply blind-vote picks. |
+| `python scripts/export_m4b.py` | Build an M4B audiobook with chapter marks. |
+| `python scripts/benchmark_chapter.py <chapter id>` | Time one chapter end to end on a copy of the database. |
+| `python scripts/check_readback.py <chapter id>` | Compare a finished MP3 against its script. |
+
+</details>
+
+<details>
+<summary><b>Optional: IndexTTS 2.5 as an alternative renderer</b></summary>
+
+IndexTTS 2.5 remains available as a single-engine edition with separate timbre and emotion controls. Install it into `models/indextts25-runtime` and select it under **Forge → Speech renderer**.
 
 ```powershell
-# 1. Export a chapter's segments  (or use the UI inspector's "External Diarization" panel)
-#    GET http://localhost:8000/api/chapters/<id>/segments
+git clone https://github.com/index-tts/index-tts.git models/indextts25-runtime
+git -C models/indextts25-runtime checkout d9e41aac89fd00b3d71497fddb287b7f24613712
+uv sync --project models/indextts25-runtime --python 3.11 --frozen
+hf download IndexTeam/IndexTTS-2.5 --revision c39ce5ba981572cb187443877ff559dfb246ce63 --local-dir models/indextts25-runtime/checkpoints --exclude "qwen*"
+```
 
-# 2a. Label them with the Claude API  (resumable; skips already-labeled chapters)
-pip install anthropic
-$env:ANTHROPIC_API_KEY = "sk-ant-..."
-python scripts/diarize_io.py format-cloud --in data/diar_export --model claude-opus-4-8
+</details>
 
-# 2b. ...or label by hand / with any other tool, matching the exported schema
+## Performance
 
-# 3. Import the labels  (re-segments the chunks, applies labels by index; the orchestrator
-#    then skips the LLM stage). POST http://localhost:8000/api/chapters/<id>/labels,
-#    or upload the label files in the same UI panel.
+Measured on an RTX 4070 (12 GB), Windows 11.
+
+| Stage | Cost |
+| --- | --- |
+| Labelling + second opinion | 15–40 s per chapter (batches of 20 average about 16 s) |
+| Fish S2 Pro character lines | about 30 s to load, then about 2 s per line; peak 9.4–10.9 GB |
+| Peak VRAM | one model at a time, kept under 12 GB; the pipeline waits for memory to clear between stages |
+
+## Limitations
+
+- **Built for one series.** Rules, aliases and the cast are tuned to *Shadow Slave*. Another book needs its own [`profiles/characters.json`](profiles/characters.json) and voices; the pipeline itself is book-agnostic.
+- **English only.** The quote scanner and attribution rules assume English typography and grammar.
+- **Review is part of the design.** About 1 quote in 10 is flagged. Unflagged lines are still about 1.6% wrong on held-out chapters.
+- **Read-back is a safety net, not a proof.** Whisper catches misread words; it cannot hear a wrong actor or an odd inflection.
+- **Source text quality.** Scraped EPUBs carry typos and occasional corrupted passages; those lines are labelled as written.
+- **Windows first.** The launchers are PowerShell and the Fish runtime is a Windows Vulkan build; the Python backend itself is portable.
+
+## Project layout
+
+```
+src/
+  epub_parser.py · book_text.py · text_cleanup.py · segmenter.py   text in, repaired and split
+  character_bible.py · attribution_evidence.py                     who could be speaking, and why
+  qwen_labeller.py · label_pipeline.py · label_director.py         votes, second opinion, storage
+  performance_score.py · recording_room.py · fish_provider.py      cues and recording engines
+  audio_assembler.py · cast_mix.py · pacing.py · book_export.py    mix, pacing, MP3 and M4B
+  orchestrator.py · api.py · state_manager.py                      pipeline, HTTP API, SQLite state
+ui/            Next.js studio: Forge, Voices, Inspector, Sound, Command Deck
+profiles/      cast routing, character sheet, delivery cues, voice briefs
+scripts/       labelling, casting, evaluation and export tools
+tests/         347 Python tests; ui/tests holds 54 more. No GPU needed.
 ```
 
 ## Tests
 
-Nothing in the test suite needs a GPU — the LLM call and the synthesizer are monkeypatched.
-
 ```powershell
-# All Python tests at once
-pytest
-
-# Frontend
-cd ui && npm test && npm run typecheck
+pytest                                  # backend: models and synthesis are stubbed
+cd ui; npm test; npm run typecheck      # studio
 ```
 
-## Changelog
+## Contributing
 
-### [v0.1.0](https://github.com/ch4ngingstar/one-who-reads-aloud-v2/releases/tag/v0.1.0) — First release
+Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Please never attach novel text, book audio or model weights.
 
-First tagged release: a major new feature plus a correctness, emotion-quality, performance, and reliability pass.
+## Credits
 
-- **External diarization (bring your own labels / Claude API)** — diarize a chapter without the local 14&nbsp;GB LLM: export segments, label them via the Claude API / another tool / by hand, and import them back (see the section above). Text stays verbatim; only speaker + emotion come from outside.
-- **Correctness audit** — a read-only QA gate (CLI + API) that checks a chapter/project for integrity issues without mutating pipeline state.
-- **Faster TTS** — greedy decoding (`num_beams` 3 → 1) is several times faster per line and *more* expressive on emotional lines (beam search averaged out delivery).
-- **Diarization correctness** — the segmenter pairs double-quotes by position, so "wrong-handed" curly dialogue (opening with `”`) is read as dialogue, not narration; emotion labels carry a prose manner-cue ("whispered"/"shouted") onto the spoken line and treat `questions → confused` tone-aware (ch_264: emotion accuracy 82.8% → 84.4%, speaker 98.4% unchanged); a line is never skipped — unmapped/NPC speakers fall back to a real voice.
-- **Emotion quality** — retuned the hot vectors (kill near-falsetto overshoot) and the weak ones (whispers/sad/pleading/cold), plus a `narrator_emo_scale` so narration stays measured while character dialogue keeps full intensity.
-- **Roster & reliability** — added post-Vol-9 speakers (Jest, Seishan, Helie, Beastmaster) and `SPEAKER_ALIASES` coverage; fixed a Windows cp1252 crash that aborted runs on any fallback/NPC-voice line.
+Built on open models and tools: [Qwen3](https://huggingface.co/Qwen/Qwen3-14B-GGUF) (labelling), [Gemma 3](https://huggingface.co/google/gemma-3-12b-it) (second opinion), [OmniVoice](https://huggingface.co/k2-fsa/OmniVoice) and [Fish Audio S2 Pro](https://huggingface.co/fishaudio/s2-pro) (voices), [audio.cpp](https://huggingface.co/audio-cpp/audio.cpp-gguf) (Fish runtime), [IndexTTS](https://github.com/index-tts/index-tts), [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (read-back), [llama.cpp](https://github.com/ggml-org/llama.cpp), FFmpeg. Model weights keep their own licences; check them before any use beyond personal listening.
 
 ## A note on the content
 
-This repo contains code only — no novel text, no audio, no model weights. You supply your own EPUB and voice clips. *Shadow Slave* is the work of Guiltythree; go read it on [Webnovel](https://www.webnovel.com/book/shadow-slave_21880912006091605).
+This repository holds code and configuration only: no novel text, no audio of the book and no model weights. The demo on the release page is an original scene written for this project. You supply your own EPUB and voice clips. *Shadow Slave* is the work of Guiltythree. Read it on [Webnovel](https://www.webnovel.com/book/shadow-slave_21880912006091605) and support the author.
 
 ## License
 
-MIT
+[MIT](LICENSE) for the code.

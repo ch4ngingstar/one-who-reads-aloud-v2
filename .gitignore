@@ -7,6 +7,14 @@ __pycache__/
 venv/
 env/
 
+# ─── Secrets ──────────────────────────────────────────────
+# `env/` above only matches a DIRECTORY -- these match the files.
+.env
+.env.*
+!.env.example
+*.key
+.vercel/
+
 # ─── Node / Next.js ───────────────────────────────────────
 ui/node_modules/
 ui/.next/
@@ -76,3 +84,12 @@ Thumbs.db
 
 # ─── Claude Code project instructions (kept local, not published) ──
 CLAUDE.md
+
+# ─── Local working files (kept on disk, never published) ──
+# Book-text dumps and one-off labelling batches: copyrighted text and personal paths.
+dialogues_*.txt
+scripts/generate_batch*.py
+scripts/get_dialogues.py
+# Casting log (holds local source paths) and pre-change profile backups.
+profiles/cast-decisions.json
+profiles/*.bak-*
